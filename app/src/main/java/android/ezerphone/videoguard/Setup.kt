@@ -221,7 +221,7 @@ object Setup {
             for (x in items) {
                 if (!Root.run("cat '${x.tmp}' > '${x.live}'").ok || !Root.run("cmp -s '${x.tmp}' '${x.live}'").ok)
                     throw Fail("כתיבה/אימות נכשלו עבור ${x.live}")
-                written += it
+                written += x
                 ui.say("✓ נכתב ${x.live}")
             }
             if (swRemoved > 0) {

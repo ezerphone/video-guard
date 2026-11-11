@@ -267,7 +267,7 @@ class CaptureService : Service() {
                 when (e.eventType) {
                     UsageEvents.Event.ACTIVITY_RESUMED -> { actState.remove(key); actState[key] = RESUMED }
                     UsageEvents.Event.ACTIVITY_PAUSED -> if (key in actState) actState[key] = PAUSED
-                    UsageEvents.Event.ACTIVITY_STOPPED, UsageEvents.Event.ACTIVITY_DESTROYED -> actState.remove(key)
+                    UsageEvents.Event.ACTIVITY_STOPPED, ACTIVITY_DESTROYED -> actState.remove(key)
                 }
             }
             lastQuery = now
@@ -472,6 +472,7 @@ class CaptureService : Service() {
         const val PIP_CHECK_MS = 800L
         private const val RESUMED = 1
         private const val PAUSED = 2
+        private const val ACTIVITY_DESTROYED = 24 // UsageEvents.Event.ACTIVITY_DESTROYED (@hide ב-SDK)
         const val REMEMBER_APP_MS = 60_000L
         const val FIRST_LOOKBACK_MS = 30 * 60_000L // בהפעלה: למצוא את האפליקציה שכבר בחזית
         const val REQUEST_TIMEOUT_MS = 20_000L

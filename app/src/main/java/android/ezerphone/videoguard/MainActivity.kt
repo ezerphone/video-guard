@@ -21,8 +21,6 @@ import android.widget.Toast
 class MainActivity : Activity() {
 
     private lateinit var status: TextView
-    private var unlocked = false
-    private var openingChild = false // פתיחת מסך-משנה שלנו לא נועלת מחדש
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,14 +29,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        openingChild = false
-        if (Prefs.hasPin(this) && !unlocked) { promptPin(); return }
+        if (Lock.needed(this)) { promptPin(); return }
         refresh()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        if (!openingChild && !isChangingConfigurations) unlocked = false
     }
 
     private fun buildUi(): View {
@@ -54,10 +46,13 @@ class MainActivity : Activity() {
 
         // ---- הפעלה ----
         root.addView(sectionLabel("מה להפעיל"))
-        root.addView(sw("הפעל זיהוי חזותי", Prefs.visualOn(this)) { Prefs.setVisualOn(this, it) })
+        root.addView(sw("הפעל זיהוי חזותי", Prefs.visualOn(this)) {
+            Prefs.setVisualOn(this, it)
+            if (it) Thread({ Guard.startVisual(applicationContext) }, "vg-visual").start()
+        })
         root.addView(sw("מחק רכיבי וידאו של המערכת", Prefs.codecsOn(this)) { Prefs.setCodecsOn(this, it) })
         root.addView(sw("סריקת אפליקציות בכל אתחול ובכל התקנה חדשה", Prefs.scanOn(this)) { Prefs.setScanOn(this, it) })
-        root.addView(sw("חסום גם אפליקציות מערכת שמזוהה בהן וידאו", Prefs.blockSystem(this)) { Prefs.setBlockSystem(this, it) })
+        root.addView(sw("סרוק והשעה גם אפליקציות מערכת (הזיהוי החזותי חל עליהן תמיד)", Prefs.blockSystem(this)) { Prefs.setBlockSystem(this, it) })
         root.addView(btn("הפעל חסימה מלאה") {
             if (!Prefs.hasPin(this)) askNewPin { launch("setup") } else launch("setup")
         })
@@ -76,7 +71,8 @@ class MainActivity : Activity() {
                     .show()
             } else {
                 Prefs.setEnforce(this, false)
-                Thread({ Scanner.releaseAll(applicationContext) }).start()
+                // משחרר את ממצאי הסריקה; אפליקציות שסומנו ידנית "מושעית" נשארות מושעות
+                Thread({ Scanner.scanAndApply(applicationContext) }).start()
             }
         })
         root.addView(btn("אפליקציות (רגילה / מותרת / מושעית)") { child(AppListActivity::class.java) })
@@ -125,12 +121,10 @@ class MainActivity : Activity() {
     }
 
     private fun launch(mode: String) {
-        openingChild = true
         startActivity(Intent(this, SetupActivity::class.java).putExtra("mode", mode))
     }
 
     private fun child(cls: Class<*>) {
-        openingChild = true
         startActivity(Intent(this, cls))
     }
 
@@ -173,7 +167,7 @@ class MainActivity : Activity() {
             .setView(box)
             .setPositiveButton(android.R.string.ok) { _, _ ->
                 val p = a.text.toString()
-                if (p.length >= 4 && p == b.text.toString()) { Prefs.setPin(this, p); unlocked = true; done() }
+                if (p.length >= 4 && p == b.text.toString()) { Prefs.setPin(this, p); Lock.unlocked = true; done() }
                 else Toast.makeText(this, "הקוד קצר מ-4 ספרות או שלא תואם", Toast.LENGTH_LONG).show()
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -197,7 +191,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.enter_pin)).setView(input).setCancelable(false)
             .setPositiveButton(android.R.string.ok) { _, _ ->
-                if (Prefs.verify(this, input.text.toString())) { unlocked = true; refresh() } else finish()
+                if (Prefs.verify(this, input.text.toString())) { Lock.unlocked = true; refresh() } else finish()
             }
             .setNegativeButton(android.R.string.cancel) { _, _ -> finish() }
             .show()

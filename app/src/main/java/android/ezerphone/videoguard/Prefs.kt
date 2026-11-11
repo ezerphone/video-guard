@@ -25,7 +25,7 @@ object Prefs {
     fun setCodecsOn(c: Context, v: Boolean) = setBool(c, "t_codecs", v)
     fun scanOn(c: Context) = bool(c, "t_scan", true)
     fun setScanOn(c: Context, v: Boolean) = setBool(c, "t_scan", v)
-    /** "חסום גם אפליקציות מערכת שמזוהה בהן וידאו": הסריקה, ההשעיה והזיהוי החזותי חלים גם עליהן. */
+    /** "סרוק והשעה גם אפליקציות מערכת": הסריקה וההשעיה חלות גם עליהן. הזיהוי החזותי חל עליהן תמיד. */
     fun blockSystem(c: Context) = bool(c, "t_system", false)
     fun setBlockSystem(c: Context, v: Boolean) = setBool(c, "t_system", v)
     /** כבוי = הסריקה רק מדווחת ליומן ולא משעה כלום. */
@@ -48,9 +48,15 @@ object Prefs {
 
     // ---- מצב ההגדרה ----
     fun setupDone(c: Context) = bool(c, "setup_done", false)
-    fun setSetupDone(c: Context, v: Boolean) = setBool(c, "setup_done", v)
     fun pendingVerify(c: Context) = bool(c, "pending_verify", false)
     fun setPendingVerify(c: Context, v: Boolean) = setBool(c, "pending_verify", v)
+    /** נכתב ב-commit (סינכרוני), כי מיד אחריו המכשיר עשוי לאתחל ו-apply לא יספיק להגיע לדיסק. */
+    fun setSetupState(c: Context, done: Boolean, pendingVerify: Boolean) {
+        sp(c).edit().putBoolean("setup_done", done).putBoolean("pending_verify", pendingVerify).commit()
+    }
+    /** מנגנון הבטיחות של האתחול הופעל (/data/vg/restored). נבדק ב-root באתחול ומוצג במסך הראשי. */
+    fun restoredMode(c: Context) = bool(c, "restored_mode", false)
+    fun setRestoredMode(c: Context, v: Boolean) = setBool(c, "restored_mode", v)
     fun lastVerify(c: Context): String = sp(c).getString("last_verify", "") ?: ""
     fun setLastVerify(c: Context, s: String) { sp(c).edit().putString("last_verify", s).apply() }
 
@@ -94,10 +100,13 @@ object Prefs {
         }
     }
 
-    /** האם הזיהוי החזותי פועל באפליקציה הזו. נקרא מ-CaptureService בכל מחזור. */
+    /**
+     * האם הזיהוי החזותי פועל באפליקציה הזו. נקרא מ-CaptureService בכל מחזור.
+     * חל גם על אפליקציות מערכת: Chrome ו-YouTube מותקנים מראש כאפליקציות מערכת, ול-Chrome יש
+     * מפענחים משלו, כך שבלי זה הם לא נבדקים בכלל. רכיבי מערכת חיוניים מוחרגים ב-[Scanner.isProtected].
+     */
     fun blockApplies(c: Context, pkg: String): Boolean {
         if (!visualOn(c)) return false
-        if (!blockSystem(c) && isSystem(c, pkg)) return false
         return if (pkg in allowedApps(c)) pkg in allowedVisual(c) else true
     }
 

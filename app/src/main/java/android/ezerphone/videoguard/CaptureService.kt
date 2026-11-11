@@ -68,13 +68,15 @@ class CaptureService : Service() {
     private var blockedPackage: String? = null
     private var focusRequest: AudioFocusRequest? = null
 
-    private var homePkg: String? = null
+    private var homePkgs: Set<String> = emptySet()
     private var cooldownUntil = 0L
     private val blockMemory = HashMap<String, Long>()
     private val exemptCache = HashMap<String, Boolean>()
 
-    // האפליקציה האחרונה שעלתה לחזית — נשמרת, כדי שהזיהוי לא ייכבה כשנשארים בה זמן רב
-    private var lastFg: String? = null
+    // מצב כל פעילות לפי נתוני השימוש: "pkg/class" -> RESUMED או PAUSED. פעילות שעברה ל-STOPPED
+    // יוצאת מהמפה. כך רואים גם חלון צף (PiP, נשאר PAUSED) וגם מסך מפוצל (שתיהן RESUMED),
+    // ולא רק את האחרונה שעלתה לחזית.
+    private val actState = LinkedHashMap<String, Int>()
     private var lastQuery = 0L
 
     private var reacquireDelay = REACQUIRE_MIN_MS
@@ -113,7 +115,7 @@ class CaptureService : Service() {
     override fun onCreate() {
         super.onCreate()
         running = true
-        homePkg = resolveHome()
+        homePkgs = Scanner.homePackages(this)
         startInForeground()
         addTouchWatcher()
     }
@@ -197,29 +199,37 @@ class CaptureService : Service() {
         if (!power.isInteractive) { pauseCapture(); return IDLE_INTERVAL_MS }
         if (keyguard.isKeyguardLocked) { pauseCapture(); return MOTION_INTERVAL_MS }
 
-        val pkg = currentForegroundPackage() ?: run { pauseCapture(); return MOTION_INTERVAL_MS }
+        val visible = visiblePackages()
+        if (visible.isEmpty()) { pauseCapture(); return MOTION_INTERVAL_MS }
 
-        // אם כבר מוצגת חסימה — להסיר אותה רק כשיוצאים מהאפליקציה החסומה
+        // אם כבר מוצגת חסימה — להסיר אותה רק כשהאפליקציה החסומה כבר לא על המסך
         if (overlay != null) {
             pauseCapture()
-            if (pkg != blockedPackage && pkg != packageName) hideOverlay()
+            if (blockedPackage !in visible) hideOverlay()
             return MOTION_INTERVAL_MS
         }
 
         val now = SystemClock.uptimeMillis()
-        if (now < cooldownUntil || pkg == packageName || pkg == homePkg ||
-            isLauncherOrSysUi(pkg) || !Prefs.blockApplies(this, pkg)) {
-            pauseCapture(); return MOTION_INTERVAL_MS
+        if (now < cooldownUntil) { pauseCapture(); return MOTION_INTERVAL_MS }
+
+        // כל האפליקציות הגלויות שהזיהוי חל עליהן (מהחדשה לישנה)
+        val cands = visible.filter {
+            it != packageName && it !in homePkgs && it != "com.android.systemui" &&
+                !Scanner.isEssential(this, it) && Prefs.blockApplies(this, it)
         }
+        if (cands.isEmpty()) { pauseCapture(); return MOTION_INTERVAL_MS }
 
         // חזרה לאפליקציה שנחסמה לאחרונה
-        if (recentlyBlocked("pkg:$pkg", now)) { showOverlay(pkg, remember = false); return MOTION_INTERVAL_MS }
+        cands.firstOrNull { recentlyBlocked("pkg:$it", now) }?.let { showOverlay(it, remember = false); return MOTION_INTERVAL_MS }
 
-        // אפליקציות שכל מטרתן וידאו — חסימה מיידית (עובד גם בלי הרשאת צילום)
-        if (pkg in VIDEO_APPS) { showOverlay(pkg); return MOTION_INTERVAL_MS }
+        // אפליקציות שכל מטרתן וידאו — חסימה מיידית (עובד גם בלי הרשאת צילום).
+        // אפליקציה "מותרת" שהשאירו לה זיהוי חזותי עוברת רק את זיהוי התנועה.
+        val allowed = Prefs.allowedApps(this)
+        cands.firstOrNull { it in VIDEO_APPS && it !in allowed }?.let { showOverlay(it); return MOTION_INTERVAL_MS }
 
-        // אפליקציות שבהן תנועה לגיטימית (מצלמה, שיחות וידאו, ניווט, משחקים)
-        if (isMotionExempt(pkg)) { pauseCapture(); return MOTION_INTERVAL_MS }
+        // אפליקציות שבהן תנועה לגיטימית (שיחות וידאו, ניווט, משחקים)
+        val motion = cands.filter { !isMotionExempt(it) }
+        if (motion.isEmpty()) { pauseCapture(); return MOTION_INTERVAL_MS }
 
         val g = grabber ?: return MOTION_INTERVAL_MS
         if (g.resume()) detector.reset()
@@ -227,7 +237,8 @@ class CaptureService : Service() {
         val touchRecent = now - lastTouch < TOUCH_SCROLL_MS
         val video = if (luma == null) { detector.idle(); false }
             else detector.analyze(luma, g.gridW, g.gridH, touchRecent)
-        if (pkg != lastLogPkg) { Log.d(TAG, "fg=$pkg"); lastLogPkg = pkg }
+        val pkg = motion.first()
+        if (pkg != lastLogPkg) { Log.d(TAG, "fg=$pkg visible=$visible"); lastLogPkg = pkg }
         Log.d(TAG, "${detector.lastInfo}${if (touchRecent) " touch" else ""}")
         if (video) showOverlay(pkg)
         return MOTION_INTERVAL_MS
@@ -240,8 +251,11 @@ class CaptureService : Service() {
 
     // ───────────────────────── זיהוי אפליקציה בחזית ─────────────────────────
 
-    /** קורא רק אירועים חדשים מאז הבדיקה הקודמת, וזוכר את האחרונה שעלתה לחזית. */
-    private fun currentForegroundPackage(): String? {
+    /**
+     * קורא רק אירועים חדשים מאז הבדיקה הקודמת, ומחזיר את החבילות שיש להן פעילות גלויה
+     * (RESUMED או PAUSED), מהאחרונה שעלתה לחזית לישנה.
+     */
+    private fun visiblePackages(): List<String> {
         val now = System.currentTimeMillis()
         val from = if (lastQuery == 0L || lastQuery > now) now - FIRST_LOOKBACK_MS else lastQuery - 1_000L
         try {
@@ -249,26 +263,29 @@ class CaptureService : Service() {
             val e = UsageEvents.Event()
             while (events.hasNextEvent()) {
                 events.getNextEvent(e)
-                if (e.eventType == UsageEvents.Event.ACTIVITY_RESUMED) lastFg = e.packageName
+                val key = "${e.packageName}/${e.className}"
+                when (e.eventType) {
+                    UsageEvents.Event.ACTIVITY_RESUMED -> { actState.remove(key); actState[key] = RESUMED }
+                    UsageEvents.Event.ACTIVITY_PAUSED -> if (key in actState) actState[key] = PAUSED
+                    UsageEvents.Event.ACTIVITY_STOPPED, UsageEvents.Event.ACTIVITY_DESTROYED -> actState.remove(key)
+                }
             }
             lastQuery = now
         } catch (_: Exception) {}
-        return lastFg
+        val out = LinkedHashSet<String>()
+        for (k in actState.keys.reversed()) out += k.substringBefore('/')
+        return out.toList()
     }
 
-    private fun resolveHome(): String? = try {
-        packageManager.resolveActivity(
-            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
-            android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
-        )?.activityInfo?.packageName
-    } catch (_: Exception) { null }
+    private fun forget(pkg: String) {
+        actState.keys.removeAll { it.substringBefore('/') == pkg }
+    }
 
-    private fun isLauncherOrSysUi(pkg: String) =
-        pkg == "com.android.systemui" || pkg.contains("launcher", ignoreCase = true)
-
+    /** מצלמות מוחרגות כבר ב-[Scanner.isEssential] (לפי intent ולא לפי שם). */
     private fun isMotionExempt(pkg: String): Boolean = exemptCache.getOrPut(pkg) {
         if (pkg in MOTION_EXEMPT_APPS) return@getOrPut true
-        if (EXEMPT_NAME_HINTS.any { pkg.contains(it, ignoreCase = true) }) return@getOrPut true
+        // "משחק" הוא הצהרה של האפליקציה עצמה; אפליקציה שהסריקה תפסה כנגן לא נהנית ממנה
+        if (pkg in VIDEO_APPS || pkg in Scanner.last) return@getOrPut false
         try {
             val info = packageManager.getApplicationInfo(pkg, 0)
             @Suppress("DEPRECATION")
@@ -350,12 +367,21 @@ class CaptureService : Service() {
     }
 
     private fun dismissToHome() {
+        val pkg = blockedPackage
         cooldownUntil = SystemClock.uptimeMillis() + COOLDOWN_MS
         hideOverlay()
         try {
             startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (_: Exception) {}
+        // חלון צף (PiP) נשאר על המסך גם אחרי מעבר למסך הבית, והחסימה הייתה חוזרת שוב ושוב בלי
+        // דרך לסגור אותו (החלון האטום מכסה את כפתור הסגירה). אם האפליקציה עדיין גלויה — עוצרים אותה.
+        if (pkg != null) handler.postDelayed({
+            if (pkg in visiblePackages() && pkg !in homePkgs) {
+                forget(pkg)
+                Root.bg { Root.run("am force-stop $pkg") }
+            }
+        }, PIP_CHECK_MS)
     }
 
     private fun hideOverlay() {
@@ -443,6 +469,9 @@ class CaptureService : Service() {
         const val MOTION_INTERVAL_MS = 350L
         const val IDLE_INTERVAL_MS = 2_000L        // מסך כבוי
         const val COOLDOWN_MS = 1500L
+        const val PIP_CHECK_MS = 800L
+        private const val RESUMED = 1
+        private const val PAUSED = 2
         const val REMEMBER_APP_MS = 60_000L
         const val FIRST_LOOKBACK_MS = 30 * 60_000L // בהפעלה: למצוא את האפליקציה שכבר בחזית
         const val REQUEST_TIMEOUT_MS = 20_000L
@@ -498,7 +527,5 @@ class CaptureService : Service() {
             "org.jitsi.meet",
             "com.google.android.apps.maps", "com.waze"
         )
-
-        val EXEMPT_NAME_HINTS = listOf("camera")
     }
 }

@@ -24,7 +24,24 @@ jobs:
         with:
           gradle-version: "8.7"
 
+      # מפתח חתימה קבוע מה-secret (ראה README). בלעדיו כל בנייה נחתמת במפתח אקראי ועדכונים נכשלים.
+      - name: Signing key
+        env:
+          VG_KEYSTORE_B64: ${{ secrets.VG_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$VG_KEYSTORE_B64" ]; then
+            echo "$VG_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/vg.keystore"
+            echo "VG_KEYSTORE=$RUNNER_TEMP/vg.keystore" >> "$GITHUB_ENV"
+            echo "Signing with the stable key from VG_KEYSTORE_B64"
+          else
+            echo "::warning::Secret VG_KEYSTORE_B64 is not set: the APK is signed with a random debug key and cannot update an installed copy."
+          fi
+
       - name: Build debug APK
+        env:
+          VG_KEYSTORE_PASSWORD: ${{ secrets.VG_KEYSTORE_PASSWORD }}
+          VG_KEY_ALIAS: ${{ secrets.VG_KEY_ALIAS }}
+          VG_KEY_PASSWORD: ${{ secrets.VG_KEY_PASSWORD }}
         run: gradle assembleDebug --no-daemon
 
       - name: Collect APK

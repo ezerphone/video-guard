@@ -1,9 +1,12 @@
 # VideoGuard. To remove: delete this file and /system/etc/vg (the app's "Cancel all" does it).
+# The scripts run in Magisk's domain: init will not exec a script without a seclabel.
 on post-fs-data
-    exec - root root -- /system/bin/sh /system/etc/vg/boot_guard.sh pre
+    exec u:r:magisk:s0 root root -- /system/bin/sh /system/etc/vg/boot_guard.sh pre
 
+# In restored mode boot_guard.sh has already bound the original XML over swcodec.xml,
+# so this mount then shows the original, not the filtered copy.
 on property:apexd.status=ready
     mount none /system/etc/vg/swcodec.xml /apex/com.android.media.swcodec/etc/media_codecs.xml bind
 
 on property:sys.boot_completed=1
-    exec_background - root root -- /system/bin/sh /system/etc/vg/boot_guard.sh ok
+    exec_background u:r:magisk:s0 root root -- /system/bin/sh /system/etc/vg/boot_guard.sh ok

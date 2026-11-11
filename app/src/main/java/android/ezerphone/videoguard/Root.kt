@@ -14,7 +14,9 @@ object VgLog {
     private const val MAX_LINES = 1500
     private val lines = ArrayList<String>()
     private var file: File? = null
+    private const val MAX_FILE = 256 * 1024L
     private val fmt = SimpleDateFormat("HH:mm:ss", Locale.US)
+    private var sinceTrim = 0
 
     @Synchronized
     fun init(c: Context) {
@@ -38,6 +40,14 @@ object VgLog {
             lines.add(line)
             if (lines.size > MAX_LINES) lines.removeAt(0)
             try { file?.appendText(line + "\n") } catch (_: Exception) {}
+        }
+        // התהליך persistent ולא מתאתחל, ולכן הקובץ נחתך גם תוך כדי ריצה ולא רק ב-init
+        if (++sinceTrim >= 200) {
+            sinceTrim = 0
+            try {
+                val f = file
+                if (f != null && f.length() > MAX_FILE) f.writeText(lines.joinToString("\n") + "\n")
+            } catch (_: Exception) {}
         }
     }
 
@@ -87,6 +97,12 @@ object Root {
             Res(-1, listOf(t.message ?: "error"))
         }
     }
+
+    /**
+     * כמו [run], אבל הפקודות משורשרות ב-&&: נעצר בכישלון הראשון, והתוצאה נכשלת אם *אחת* מהן נכשלה.
+     * ב-[run] רק קוד היציאה של הפקודה האחרונה נבדק. פקודה עם || חייבת להיות עטופה ב-{ ...; }.
+     */
+    fun chain(vararg cmds: String): Res = run(cmds.joinToString(" && \\\n  "))
 
     /** הרצה בלי רישום הפלט (לקריאת קבצים גדולים / טבלת mount). */
     fun quiet(cmd: String): List<String> = try {

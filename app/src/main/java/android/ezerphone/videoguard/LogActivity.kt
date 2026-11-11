@@ -47,7 +47,11 @@ class LogActivity : Activity() {
         setContentView(root)
     }
 
-    override fun onResume() { super.onResume(); h.post(tick) }
+    override fun onResume() {
+        super.onResume()
+        if (Lock.needed(this)) { finish(); return }
+        h.post(tick)
+    }
     override fun onPause() { super.onPause(); h.removeCallbacks(tick) }
 
     private fun render() {

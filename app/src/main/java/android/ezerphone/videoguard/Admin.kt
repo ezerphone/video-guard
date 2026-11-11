@@ -4,6 +4,7 @@ import android.app.admin.DeviceAdminReceiver
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 
 class VgAdmin : DeviceAdminReceiver()
 
@@ -42,13 +43,23 @@ object Admin {
         }
     }
 
-    fun magiskPackages(c: Context): List<String> = try {
-        val pm = c.packageManager
-        pm.getInstalledApplications(0).filter {
-            it.packageName != c.packageName &&
-                (it.packageName.contains("magisk", true) || pm.getApplicationLabel(it).toString().equals("Magisk", true))
-        }.map { it.packageName }
-    } catch (_: Exception) { emptyList() }
+    /**
+     * חבילות Magisk, כולל כאלה שכבר הוסתרו: getInstalledApplications(0) לא מחזיר אפליקציה מוסתרת,
+     * ואז כיבוי המתג לא היה מחזיר אותה. לכן MATCH_UNINSTALLED_PACKAGES + מה שהסתרנו בעבר.
+     */
+    @Suppress("DEPRECATION")
+    fun magiskPackages(c: Context): List<String> {
+        val out = LinkedHashSet<String>(Prefs.hiddenByUs(c))
+        try {
+            val pm = c.packageManager
+            pm.getInstalledApplications(PackageManager.MATCH_UNINSTALLED_PACKAGES).filter {
+                it.packageName != c.packageName &&
+                    (it.packageName.contains("magisk", true) || pm.getApplicationLabel(it).toString().equals("Magisk", true))
+            }.forEach { out += it.packageName }
+        } catch (_: Exception) {}
+        out -= c.packageName
+        return out.toList()
+    }
 
     /** מחיל את כל ההגבלות לפי המתגים. דורש Device Owner. */
     fun applyAll(c: Context): List<String> {

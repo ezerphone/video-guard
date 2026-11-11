@@ -37,8 +37,10 @@
             android:name=".LogActivity"
             android:exported="false" />
 
+        <!-- סיבוב מסך לא יוצר את המסך מחדש: ההגדרה רצה ב-thread שמחזיק את המסך הזה -->
         <activity
             android:name=".SetupActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode|density|fontScale|locale|layoutDirection"
             android:exported="false" />
 
         <receiver

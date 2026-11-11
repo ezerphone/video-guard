@@ -25,7 +25,7 @@ class AppListActivity : Activity() {
         }
         root.addView(TextView(this).apply { text = "אפליקציות"; textSize = 20f })
         root.addView(TextView(this).apply {
-            text = "רגילה: נסרקת ועוברת זיהוי חזותי. מותרת: לא עוברת שום בדיקה (אפשר לסמן \"זיהוי חזותי\"). מושעית: מושעית תמיד (באכיפה)."
+            text = "רגילה: נסרקת ועוברת זיהוי חזותי. מותרת: לא עוברת שום בדיקה (אפשר לסמן \"זיהוי חזותי\"). מושעית: מושעית תמיד (דורש Device Owner)."
             textSize = 12f; setPadding(0, dp(4), 0, dp(8))
         })
         root.addView(CheckBox(this).apply {
@@ -43,10 +43,16 @@ class AppListActivity : Activity() {
         }, "vg-applist-scan").start()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // מסך מוגן: אם האפליקציה ננעלה (יצאו ממנה) — חוזרים למסך הראשי, שמבקש PIN
+        if (Lock.needed(this)) finish()
+    }
+
     override fun onPause() {
         super.onPause()
-        // שינוי מצבים נכנס לתוקף בסריקה הבאה; כאן מריצים אותה מיד
-        if (Prefs.scanOn(this)) Thread({ Scanner.scanAndApply(applicationContext) }, "vg-apply").start()
+        // שינוי מצבים נכנס לתוקף מיד ("מושעית" חלה גם כשהסריקה כבויה)
+        Thread({ Scanner.scanAndApply(applicationContext) }, "vg-apply").start()
     }
 
     private fun fill() {

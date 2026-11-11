@@ -13,7 +13,7 @@ object Verify {
 
     private val PROC_RE = Regex("mediaswcodec|mediaserver|media\\.codec|mediacodec|c2@|c2-|omx|\\.media\\.", RegexOption.IGNORE_CASE)
 
-    /** כמה מפענחי וידאו מכל הסוגים רואה כל אחד מתהליכי המדיה, לפי אותו סינון של ההסרה. */
+    /** כמה מפענחי וידאו רואה כל אחד מתהליכי המדיה, לפי אותו סינון של ההסרה. */
     fun run(c: Context): Result {
         val sb = StringBuilder()
         val bb = listOf("/data/adb/magisk/busybox", "/data/adb/ksu/bin/busybox", "/data/adb/ap/bin/busybox")
@@ -40,14 +40,15 @@ object Verify {
                 val t = l.trim().split(Regex("\\s+"), 2)
                 if (t.size == 2 && t[0].toIntOrNull() != null && PROC_RE.containsMatchIn(t[1])) t[0] to t[1] else null
             }.take(8)
-            var sum = 0; var seen = 0
+            // כל תהליך רואה את אותה רשימה מבחינתו; סכום היה מכפיל. המדד = המקסימום שתהליך כלשהו רואה.
+            var most = 0; var seen = 0
             for ((pid, name) in pids) {
                 val o = Root.quiet("nsenter -t $pid -m -- sh '${sh.absolutePath}'").lastOrNull()?.trim().orEmpty()
                 val n = o.split(' ').firstOrNull()?.toIntOrNull()
                 sb.append("  $name ($pid): ").append(if (n != null) "$n  [grep: ${o.substringAfter(' ', "?")}]" else "לא נקרא ($o)").append('\n')
-                if (n != null) { sum += n; seen++ }
+                if (n != null) { most = maxOf(most, n); seen++ }
             }
-            if (seen > 0) total = sum else sb.append("  ⚠ לא נמצאו תהליכי מדיה לבדיקה\n")
+            if (seen > 0) total = most else sb.append("  ⚠ לא נמצאו תהליכי מדיה לבדיקה\n")
         } else sb.append("  ⚠ אין busybox — אי אפשר לספור מתוך תהליכי המדיה\n")
 
         val viaList = try {
@@ -56,7 +57,7 @@ object Verify {
             }
         } catch (_: Throwable) { -1 }
 
-        val head = "מפענחי וידאו במערכת: ${total ?: "לא ידוע"}"
+        val head = "מפענחי וידאו במערכת (המקסימום בתהליכי המדיה): ${total ?: "לא ידוע"}"
         val text = head + "\nדרך MediaCodecList (כמו שכל אפליקציה רואה): ${if (viaList >= 0) viaList else "שגיאה"}\n" + sb
         VgLog.add(text)
         val stamp = SimpleDateFormat("dd/MM HH:mm", Locale.US).format(Date())

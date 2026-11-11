@@ -4,10 +4,8 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
 import android.os.Bundle
 import android.text.InputType
-import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
@@ -17,207 +15,190 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 
-/** המסך הראשי: מתגי ההפעלה, "הפעל חסימה מלאה", הגבלות, אפליקציות, אבחון ו"בטל הכל". מוגן ב-PIN. */
-class MainActivity : Activity() {
+/** רכיבי מסך משותפים (בלי קבצי layout). */
+object Kit {
+    fun dp(c: Context, v: Int) = (v * c.resources.displayMetrics.density).toInt()
 
+    fun page(a: Activity, title: String): LinearLayout {
+        val root = LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(a, 16), dp(a, 16), dp(a, 16), dp(a, 24))
+        }
+        root.addView(TextView(a).apply { text = title; textSize = 24f })
+        a.setContentView(ScrollView(a).apply { addView(root) })
+        return root
+    }
+
+    fun section(c: Context, t: String) = TextView(c).apply {
+        text = t; textSize = 18f; setPadding(0, dp(c, 20), 0, dp(c, 4))
+    }
+
+    fun note(c: Context, t: String) = TextView(c).apply { text = t; textSize = 13f; alpha = 0.75f }
+
+    fun button(c: Context, t: String, f: () -> Unit) = Button(c).apply { text = t; setOnClickListener { f() } }
+
+    @Suppress("UseSwitchCompatOrMaterialCode")
+    fun switch(c: Context, t: String, on: Boolean, f: (Boolean) -> Unit) = Switch(c).apply {
+        text = t; isChecked = on; textSize = 15f
+        setPadding(0, dp(c, 6), 0, dp(c, 6))
+        setOnCheckedChangeListener { _, v -> f(v) }
+    }
+
+    fun pinField(c: Context, hint: String) = EditText(c).apply {
+        this.hint = hint
+        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+    }
+}
+
+class MainActivity : Activity() {
     private lateinit var status: TextView
-    private var unlocked = false
-    private var openingChild = false // פתיחת מסך-משנה שלנו לא נועלת מחדש
+    private lateinit var protectBtn: Button
+    private lateinit var serviceSw: Switch
+    private var dialogOpen = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(buildUi())
+        val root = Kit.page(this, getString(R.string.app_name))
+        status = TextView(this).apply { textSize = 15f; setPadding(0, Kit.dp(this@MainActivity, 8), 0, 0) }
+        root.addView(status)
+
+        root.addView(Kit.section(this, "מפענחי וידאו"))
+        root.addView(Kit.note(this, "מוחק את מפענחי הווידאו מקבצי המערכת (גיבוי נשמר). נכנס לתוקף אחרי אתחול."))
+        root.addView(Kit.button(this, "מחק מפענחי וידאו") { task("remove") })
+        root.addView(Kit.button(this, "שחזר מפענחים") { task("restore") })
+
+        root.addView(Kit.section(this, "סריקת אפליקציות"))
+        root.addView(Kit.note(this, "אפליקציה שפותחת קבצי וידאו או מצרפת ספריית פענוח משלה — מושעית. אפליקציות מערכת לא נסרקות."))
+        serviceSw = Kit.switch(this, "שירות סריקה בכל התקנה ועדכון", Prefs.serviceOn(this)) { on ->
+            Prefs.setServiceOn(this, on)
+            if (on) ScanService.start(applicationContext) else ScanService.stop(applicationContext)
+            refresh()
+        }
+        root.addView(serviceSw)
+        root.addView(Kit.button(this, "סרוק הכל עכשיו") { task("scan") })
+        root.addView(Kit.button(this, "אפליקציות מושעות ופטורות") { startActivity(Intent(this, AppsActivity::class.java)) })
+
+        root.addView(Kit.section(this, "הגנה"))
+        root.addView(Kit.note(this, "Device Owner: חוסם את הסרת האפליקציה, וההשעיות לא ניתנות לביטול מבחוץ. דורש להסיר קודם את כל החשבונות מהמכשיר."))
+        protectBtn = Kit.button(this, "") { task(if (Admin.isOwner(this)) "unprotect" else "protect") }
+        root.addView(protectBtn)
+        root.addView(lockSwitch("חסום מצב בטוח", Prefs.lockSafeBoot(this)) { Prefs.setLockSafeBoot(this, it) })
+        root.addView(lockSwitch("חסום איפוס יצרן מההגדרות", Prefs.lockFactoryReset(this)) { Prefs.setLockFactoryReset(this, it) })
+        root.addView(lockSwitch("חסום ADB ואפשרויות מפתח", Prefs.lockAdb(this)) { Prefs.setLockAdb(this, it) })
+        root.addView(Kit.button(this, "שנה PIN") { setPin(mandatory = false) })
+
+        root.addView(Kit.section(this, "יומן"))
+        root.addView(Kit.button(this, "יומן פעולות") { startActivity(Intent(this, LogActivity::class.java)) })
+    }
+
+    private fun lockSwitch(t: String, on: Boolean, set: (Boolean) -> Unit) = Kit.switch(this, t, on) { v ->
+        set(v)
+        val app = applicationContext
+        if (Admin.isOwner(app)) Root.bg { Admin.applyLocks(app) }
     }
 
     override fun onResume() {
         super.onResume()
-        openingChild = false
-        if (Prefs.hasPin(this) && !unlocked) { promptPin(); return }
-        refresh()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        if (!openingChild && !isChangingConfigurations) unlocked = false
-    }
-
-    private fun buildUi(): View {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(28), dp(24), dp(28))
+        when {
+            !Prefs.hasPin(this) -> setPin(mandatory = true)
+            Lock.needed(this) -> askPin()
+            else -> refresh()
         }
-        root.addView(TextView(this).apply {
-            text = getString(R.string.app_name); textSize = 26f; setTextColor(Color.BLACK)
-        })
-        status = TextView(this).apply { textSize = 14f; setPadding(0, dp(10), 0, dp(16)) }
-        root.addView(status)
-
-        // ---- הפעלה ----
-        root.addView(sectionLabel("מה להפעיל"))
-        root.addView(sw("הפעל זיהוי חזותי", Prefs.visualOn(this)) { Prefs.setVisualOn(this, it) })
-        root.addView(sw("מחק רכיבי וידאו של המערכת", Prefs.codecsOn(this)) { Prefs.setCodecsOn(this, it) })
-        root.addView(sw("סריקת אפליקציות בכל אתחול ובכל התקנה חדשה", Prefs.scanOn(this)) { Prefs.setScanOn(this, it) })
-        root.addView(sw("חסום גם אפליקציות מערכת שמזוהה בהן וידאו", Prefs.blockSystem(this)) { Prefs.setBlockSystem(this, it) })
-        root.addView(btn("הפעל חסימה מלאה") {
-            if (!Prefs.hasPin(this)) askNewPin { launch("setup") } else launch("setup")
-        })
-
-        // ---- סריקה והשעיה ----
-        root.addView(sectionLabel("סריקה והשעיה"))
-        root.addView(sw("אכוף השעיה (כבוי = דיווח ליומן בלבד)", Prefs.enforce(this)) { on ->
-            if (on) {
-                AlertDialog.Builder(this)
-                    .setMessage("להפעיל אכיפה? אפליקציות שנתפסו בסריקה יושעו. כדאי קודם לעבור על רשימת האפליקציות ולסמן \"מותרת\" מה שצריך.")
-                    .setPositiveButton("הפעל") { _, _ ->
-                        Prefs.setEnforce(this, true)
-                        Thread({ Scanner.scanAndApply(applicationContext) }).start()
-                    }
-                    .setNegativeButton("בטל") { _, _ -> refreshAll() }
-                    .show()
-            } else {
-                Prefs.setEnforce(this, false)
-                Thread({ Scanner.releaseAll(applicationContext) }).start()
-            }
-        })
-        root.addView(btn("אפליקציות (רגילה / מותרת / מושעית)") { child(AppListActivity::class.java) })
-        root.addView(btn("סרוק עכשיו") {
-            Thread({
-                Scanner.scanAndApply(applicationContext)
-                runOnUiThread { Toast.makeText(this, "נמצאו ${Scanner.last.size} — פירוט ביומן", Toast.LENGTH_LONG).show() }
-            }).start()
-        })
-
-        // ---- הגבלות ----
-        root.addView(sectionLabel("הגבלות (Device Owner)"))
-        Prefs.RESTRICTIONS.forEach { r ->
-            root.addView(sw(r.label, Prefs.restr(this, r)) { Prefs.setRestr(this, r, it) })
-        }
-        root.addView(sw("הסתר את אפליקציית Magisk (ליבת ה-root ממשיכה לפעול)", Prefs.hideMagisk(this)) { Prefs.setHideMagisk(this, it) })
-        root.addView(btn("החל הגבלות עכשיו") {
-            Thread({
-                val ok = Admin.isOwner(applicationContext)
-                if (ok) Admin.applyAll(applicationContext)
-                runOnUiThread { Toast.makeText(this, if (ok) "הוחלו" else "האפליקציה אינה Device Owner", Toast.LENGTH_SHORT).show() }
-            }).start()
-        })
-
-        // ---- אבחון ----
-        root.addView(sectionLabel("אבחון"))
-        root.addView(btn("הפעל זיהוי חזותי עכשיו") {
-            Thread({ if (Root.available()) Guard.grantOps(applicationContext); Guard.startVisual(applicationContext) }).start()
-        })
-        root.addView(btn("בדוק מפענחי וידאו") {
-            Thread({
-                val r = Verify.run(applicationContext)
-                runOnUiThread { AlertDialog.Builder(this).setMessage(r.text).setPositiveButton("סגור", null).show(); refresh() }
-            }).start()
-        })
-        root.addView(btn("יומן פקודות") { child(LogActivity::class.java) })
-
-        // ---- קוד ושחרור ----
-        root.addView(sectionLabel("קוד הגנה ושחרור"))
-        root.addView(btn("הגדרת / שינוי קוד") { askNewPin { refresh() } })
-        root.addView(btn("בטל הכל") {
-            if (Prefs.hasPin(this)) askPin { launch("undo") } else launch("undo")
-        }.apply { setTextColor(Color.parseColor("#B00020")) })
-
-        return ScrollView(this).apply { addView(root) }
     }
 
-    private fun launch(mode: String) {
-        openingChild = true
-        startActivity(Intent(this, SetupActivity::class.java).putExtra("mode", mode))
-    }
-
-    private fun child(cls: Class<*>) {
-        openingChild = true
-        startActivity(Intent(this, cls))
-    }
-
-    private fun refreshAll() { recreate() }
+    private fun task(mode: String) = startActivity(Intent(this, TaskActivity::class.java).putExtra("mode", mode))
 
     private fun refresh() {
-        val run = CaptureService.running && CaptureService.hasProjection
-        val issues = Integrity.check(this)
-        status.text = buildString {
-            append(if (run) "● זיהוי חזותי פעיל" else "○ זיהוי חזותי כבוי")
-            append("\nDevice Owner: ").append(if (Admin.isOwner(this@MainActivity)) "כן" else "לא")
-            val v = Prefs.lastVerify(this@MainActivity)
-            if (v.isNotEmpty()) append("\nבדיקה אחרונה: ").append(v)
-            if (issues.isNotEmpty()) {
-                append("\n\n⚠ ההגנה לא שלמה, נדרשת הגדרה מחדש:\n")
-                append(issues.joinToString("\n") { "• $it" })
-            }
+        protectBtn.text = if (Admin.isOwner(this)) "הסר הגנה" else "הפעל הגנה"
+        serviceSw.isChecked = Prefs.serviceOn(this)
+        val app = applicationContext
+        Root.bg("vg-status") {
+            val dec = Codecs.visibleVideoDecoders()
+            val lines = ArrayList<String>()
+            lines += if (dec.isEmpty()) "✓ מפענחי וידאו שאפליקציות רואות: 0"
+                else "מפענחי וידאו שאפליקציות רואות: ${dec.size}"
+            lines += if (!Root.available()) "⚠ אין גישת root"
+                else "מחיקת מפענחים: " + if (Codecs.applied()) "בוצעה" else "לא בוצעה"
+            lines += "שירות סריקה: " + if (ScanService.running) "פועל" else if (Prefs.serviceOn(app)) "דלוק אבל לא רץ" else "כבוי"
+            lines += "אפליקציות מושעות: ${Prefs.suspended(app).size}"
+            lines += "הגנה: " + if (Admin.isOwner(app)) "פעילה (Device Owner)" else "כבויה"
+            runOnUiThread { if (!isFinishing) status.text = lines.joinToString("\n") }
         }
-        status.setTextColor(if (issues.isNotEmpty()) Color.parseColor("#B00020")
-            else if (run) Color.parseColor("#1B873F") else Color.DKGRAY)
     }
 
-    // ---- קוד ----
-
-    private fun pinField(hint: String) = EditText(this).apply {
-        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
-        this.hint = hint
-    }
-
-    private fun askNewPin(done: () -> Unit) {
-        val a = pinField(getString(R.string.pin_hint))
-        val b = pinField("שוב, לאישור")
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0)
-            addView(a); addView(b)
-        }
+    private fun askPin() {
+        if (dialogOpen) return
+        dialogOpen = true
+        val f = Kit.pinField(this, "PIN")
         AlertDialog.Builder(this)
-            .setTitle("הגדרת קוד הגנה")
-            .setMessage("הקוד נדרש לכניסה להגדרות. אם תשכח אותו, \"בטל הכל\" לא יעבוד.")
-            .setView(box)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
+            .setTitle("הזן PIN").setView(f).setCancelable(false)
+            .setPositiveButton("אישור") { _, _ ->
+                dialogOpen = false
+                if (Prefs.checkPin(this, f.text.toString())) { Lock.unlocked = true; refresh() }
+                else { Toast.makeText(this, "PIN שגוי", Toast.LENGTH_SHORT).show(); finish() }
+            }
+            .setNegativeButton("יציאה") { _, _ -> dialogOpen = false; finish() }
+            .show()
+    }
+
+    private fun setPin(mandatory: Boolean) {
+        if (dialogOpen) return
+        dialogOpen = true
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(Kit.dp(this@MainActivity, 20), 0, Kit.dp(this@MainActivity, 20), 0) }
+        val a = Kit.pinField(this, "PIN חדש (לפחות 4 ספרות)")
+        val b = Kit.pinField(this, "שוב")
+        box.addView(a); box.addView(b)
+        AlertDialog.Builder(this)
+            .setTitle(if (mandatory) "הגדרת PIN" else "שינוי PIN")
+            .setMessage(if (mandatory) "ה-PIN יידרש בכל כניסה לאפליקציה. אם תשכח אותו, הדרך היחידה לאפס היא root (ראה README)." else null)
+            .setView(box).setCancelable(false)
+            .setPositiveButton("שמור") { _, _ ->
+                dialogOpen = false
                 val p = a.text.toString()
-                if (p.length >= 4 && p == b.text.toString()) { Prefs.setPin(this, p); unlocked = true; done() }
-                else Toast.makeText(this, "הקוד קצר מ-4 ספרות או שלא תואם", Toast.LENGTH_LONG).show()
+                if (p.length >= 4 && p == b.text.toString()) {
+                    Prefs.setPin(this, p); Lock.unlocked = true
+                    Toast.makeText(this, "ה-PIN נשמר", Toast.LENGTH_SHORT).show(); refresh()
+                } else {
+                    Toast.makeText(this, "ה-PIN לא תואם או קצר מ-4 ספרות", Toast.LENGTH_SHORT).show()
+                    if (mandatory) setPin(true)
+                }
             }
-            .setNegativeButton(android.R.string.cancel, null)
+            .setNegativeButton(if (mandatory) "יציאה" else "ביטול") { _, _ -> dialogOpen = false; if (mandatory) finish() }
             .show()
     }
+}
 
-    private fun askPin(onOk: () -> Unit) {
-        val input = pinField("")
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.enter_pin)).setView(input)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                if (Prefs.verify(this, input.text.toString())) onOk()
-                else Toast.makeText(this, "קוד שגוי", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+/** מסך-משנה מוגן: אם האפליקציה ננעלה בינתיים, נסגר וחוזר למסך הראשי (שמבקש PIN). */
+abstract class GuardedActivity : Activity() {
+    override fun onResume() {
+        super.onResume()
+        if (Lock.needed(this) && !keepWhenLocked()) { finish(); return }
+        onShown()
+    }
+    protected open fun keepWhenLocked() = false
+    protected open fun onShown() {}
+}
+
+class LogActivity : GuardedActivity() {
+    private lateinit var tv: TextView
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val root = Kit.page(this, "יומן פעולות")
+        val bar = LinearLayout(this)
+        bar.addView(Kit.button(this, "רענן") { onShown() })
+        bar.addView(Kit.button(this, "העתק") {
+            val cm = getSystemService(android.content.ClipboardManager::class.java)
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("VideoGuard log", VgLog.text()))
+            Toast.makeText(this, "הועתק", Toast.LENGTH_SHORT).show()
+        })
+        bar.addView(Kit.button(this, "נקה") { VgLog.clear(); onShown() })
+        root.addView(bar)
+        tv = TextView(this).apply { textSize = 12f; setTextIsSelectable(true); textDirection = View.TEXT_DIRECTION_LOCALE }
+        root.addView(tv)
     }
 
-    private fun promptPin() {
-        val input = pinField("")
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.enter_pin)).setView(input).setCancelable(false)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                if (Prefs.verify(this, input.text.toString())) { unlocked = true; refresh() } else finish()
-            }
-            .setNegativeButton(android.R.string.cancel) { _, _ -> finish() }
-            .show()
+    override fun onShown() {
+        tv.text = VgLog.text().ifEmpty { "(ריק)" }
     }
-
-    // ---- עזרי UI ----
-
-    private fun sw(label: String, checked: Boolean, onChange: (Boolean) -> Unit) = Switch(this).apply {
-        text = label; isChecked = checked; setPadding(0, dp(6), 0, dp(6))
-        setOnCheckedChangeListener { _, v -> onChange(v) }
-    }
-
-    private fun btn(label: String, onClick: () -> Unit) = Button(this).apply {
-        text = label; setOnClickListener { onClick() }
-    }
-
-    private fun sectionLabel(t: String) = TextView(this).apply {
-        text = t; textSize = 17f; setTextColor(Color.BLACK)
-        setPadding(0, dp(24), 0, dp(8)); gravity = Gravity.START
-    }
-
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 }

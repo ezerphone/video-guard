@@ -4,89 +4,88 @@ import android.app.admin.DeviceAdminReceiver
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
+import android.os.UserManager
 
-class VgAdmin : DeviceAdminReceiver()
+class AdminReceiver : DeviceAdminReceiver()
 
-/** Device Owner: הגדרה דרך root, והגבלות דרך DevicePolicyManager. */
+/**
+ * Device Owner: חוסם את הסרת האפליקציה, מבצע את ההשעיות (כך שאי אפשר לבטל אותן ב-adb),
+ * ומפעיל את הנעילות שנבחרו. הופכים ל-Device Owner דרך root (`dpm set-device-owner`), וזה דורש
+ * שלא יהיו חשבונות במכשיר ולא משתמשים נוספים.
+ */
 object Admin {
-    fun dpm(c: Context): DevicePolicyManager = c.getSystemService(DevicePolicyManager::class.java)
-    fun comp(c: Context) = ComponentName(c, VgAdmin::class.java)
-    fun isOwner(c: Context) = dpm(c).isDeviceOwnerApp(c.packageName)
+    private fun dpm(c: Context) = c.getSystemService(DevicePolicyManager::class.java)
+    private fun admin(c: Context) = ComponentName(c, AdminReceiver::class.java)
 
-    /** בדיקת תנאים (קריאה בלבד) לפני שנוגעים במחיצות. מחזיר הסבר או null. */
-    fun prerequisites(c: Context): String? {
-        if (isOwner(c)) return null
-        val accounts = Root.quiet("dumpsys account").count { it.contains("Account {") }
-        val users = Root.quiet("pm list users").count { it.contains("UserInfo{") }
-        VgLog.add("Device Owner: חשבונות=$accounts משתמשים=$users")
-        if (accounts > 0) return "יש $accounts חשבונות במכשיר. הסר אותם (הגדרות > חשבונות, כולל חשבונות של אפליקציות) ונסה שוב. הגדרת Device Owner נכשלת כשיש חשבונות."
-        if (users > 1) return "יש יותר ממשתמש אחד במכשיר (משתמש משני, אורח, פרופיל עבודה או מרחב נוסף). הסר אותם ונסה שוב."
+    fun isOwner(c: Context) = try { dpm(c).isDeviceOwnerApp(c.packageName) } catch (_: Exception) { false }
+
+    /** מפעיל את ההגנה. null = הצליח, אחרת הסבר. */
+    fun protect(c: Context, ui: Ui): String? {
+        if (!isOwner(c)) {
+            if (!Root.available()) return "אין גישת root."
+            ui.say("▶ הופך ל-Device Owner")
+            val r = Root.run("dpm set-device-owner ${c.packageName}/.AdminReceiver")
+            if (!isOwner(c)) {
+                val t = r.text
+                return when {
+                    t.contains("account", true) ->
+                        "יש חשבונות במכשיר (Google ואחרים). צריך להסיר את כולם בהגדרות > חשבונות, ואז לנסות שוב. אפשר להוסיף אותם בחזרה אחרי ההפעלה.\n\n$t"
+                    t.contains("user", true) ->
+                        "יש במכשיר משתמשים נוספים או פרופיל עבודה. צריך להסיר אותם ולנסות שוב.\n\n$t"
+                    else -> "ההפעלה כ-Device Owner נכשלה:\n$t"
+                }
+            }
+            ui.say("✓ Device Owner פעיל")
+        }
+        applyLocks(c).forEach { ui.say("  $it") }
+        // השעיות שנעשו קודם דרך root עוברות ל-Device Owner
+        val ours = Prefs.suspended(c)
+        if (ours.isNotEmpty()) setSuspended(c, ours.toList(), true)
         return null
     }
 
-    /** null = הצליח, אחרת הסבר. */
-    fun becomeOwner(c: Context): String? {
-        if (isOwner(c)) return null
-        val r = Root.run("dpm set-device-owner ${c.packageName}/${VgAdmin::class.java.name}")
-        if (r.ok) {
-            Thread.sleep(500)
-            if (isOwner(c)) return null
+    /** מחיל את חסימת ההסרה ואת שלושת המתגים. מחזיר שורות סטטוס. */
+    fun applyLocks(c: Context): List<String> {
+        if (!isOwner(c)) return listOf("○ אין Device Owner — הנעילות לא הוחלו")
+        val d = dpm(c); val a = admin(c)
+        val out = ArrayList<String>()
+        try { d.setUninstallBlocked(a, c.packageName, true); out += "✓ הסרת האפליקציה חסומה" }
+        catch (t: Throwable) { out += "✗ חסימת הסרה: ${t.message}" }
+        fun r(key: String, on: Boolean, label: String) {
+            try {
+                if (on) d.addUserRestriction(a, key) else d.clearUserRestriction(a, key)
+                out += (if (on) "✓ " else "○ ") + label + (if (on) " — חסום" else " — מותר")
+            } catch (t: Throwable) { out += "✗ $label: ${t.message}" }
         }
-        val t = r.text
-        return when {
-            t.contains("account", true) -> "יש חשבונות במכשיר. הסר אותם ונסה שוב.\n$t"
-            t.contains("already set", true) || t.contains("already has", true) ->
-                "כבר קיים Device Owner או Profile Owner של אפליקציה אחרת.\n$t"
-            t.contains("user", true) -> "יש יותר ממשתמש אחד במכשיר, או שההגדרה הראשונית הסתיימה בצורה שחוסמת. הסר משתמשים נוספים.\n$t"
-            else -> "dpm set-device-owner נכשל:\n$t"
-        }
+        r(UserManager.DISALLOW_SAFE_BOOT, Prefs.lockSafeBoot(c), "מצב בטוח")
+        r(UserManager.DISALLOW_FACTORY_RESET, Prefs.lockFactoryReset(c), "איפוס יצרן מההגדרות")
+        r(UserManager.DISALLOW_DEBUGGING_FEATURES, Prefs.lockAdb(c), "ADB ואפשרויות מפתח")
+        out.forEach { VgLog.add(it) }
+        return out
     }
 
-    fun magiskPackages(c: Context): List<String> = try {
-        val pm = c.packageManager
-        pm.getInstalledApplications(0).filter {
-            it.packageName != c.packageName &&
-                (it.packageName.contains("magisk", true) || pm.getApplicationLabel(it).toString().equals("Magisk", true))
-        }.map { it.packageName }
-    } catch (_: Exception) { emptyList() }
-
-    /** מחיל את כל ההגבלות לפי המתגים. דורש Device Owner. */
-    fun applyAll(c: Context): List<String> {
-        val d = dpm(c); val a = comp(c)
-        val log = ArrayList<String>()
-        for (r in Prefs.RESTRICTIONS) {
-            try {
-                if (Prefs.restr(c, r)) d.addUserRestriction(a, r.key) else d.clearUserRestriction(a, r.key)
-                log += (if (Prefs.restr(c, r)) "✓ " else "○ ") + r.label
-            } catch (t: Throwable) { log += "✗ ${r.label}: ${t.message}" }
+    /** מסיר את כל ההגנה: משחרר את ההשעיות, מבטל נעילות וחסימת הסרה, ומסיר את Device Owner. */
+    fun unprotect(c: Context, ui: Ui) {
+        val ours = Prefs.suspended(c)
+        if (ours.isNotEmpty()) {
+            Scanner.unsuspend(c, ours)
+            ui.say("✓ שוחררו ${ours.size} אפליקציות מושעות")
         }
-        try { d.setUninstallBlocked(a, c.packageName, true); log += "✓ האפליקציה חסומה להסרה" }
-        catch (t: Throwable) { log += "✗ חסימת הסרה: ${t.message}" }
-
-        val hidden = HashSet(Prefs.hiddenByUs(c))
-        for (p in magiskPackages(c)) {
-            try {
-                d.setApplicationHidden(a, p, Prefs.hideMagisk(c))
-                if (Prefs.hideMagisk(c)) hidden += p else hidden -= p
-                log += (if (Prefs.hideMagisk(c)) "✓ הוסתרה: " else "○ מוצגת: ") + p
-            } catch (t: Throwable) { log += "✗ $p: ${t.message}" }
-        }
-        Prefs.setHiddenByUs(c, hidden)
-        log.forEach { VgLog.add(it) }
-        return log
-    }
-
-    /** מבטל את כל ההגבלות ומסיר את ה-Device Owner. */
-    @Suppress("DEPRECATION")
-    fun clearAll(c: Context) {
-        if (!isOwner(c)) { VgLog.add("אין Device Owner פעיל"); return }
-        val d = dpm(c); val a = comp(c)
-        for (r in Prefs.RESTRICTIONS) try { d.clearUserRestriction(a, r.key) } catch (_: Throwable) {}
-        Scanner.releaseAll(c)
-        for (p in Prefs.hiddenByUs(c)) try { d.setApplicationHidden(a, p, false) } catch (_: Throwable) {}
-        Prefs.setHiddenByUs(c, emptySet())
+        if (!isOwner(c)) { ui.say("○ האפליקציה אינה Device Owner"); return }
+        val d = dpm(c); val a = admin(c)
+        for (k in listOf(UserManager.DISALLOW_SAFE_BOOT, UserManager.DISALLOW_FACTORY_RESET, UserManager.DISALLOW_DEBUGGING_FEATURES))
+            try { d.clearUserRestriction(a, k) } catch (_: Throwable) {}
         try { d.setUninstallBlocked(a, c.packageName, false) } catch (_: Throwable) {}
-        try { d.clearDeviceOwnerApp(c.packageName); VgLog.add("Device Owner הוסר") }
-        catch (t: Throwable) { VgLog.add("הסרת Device Owner נכשלה: ${t.message}") }
+        @Suppress("DEPRECATION")
+        try { d.clearDeviceOwnerApp(c.packageName) } catch (t: Throwable) { ui.say("✗ הסרת Device Owner: ${t.message}") }
+        ui.say(if (isOwner(c)) "✗ Device Owner עדיין פעיל" else "✓ ההגנה הוסרה. אפשר להסיר את האפליקציה כרגיל.")
+    }
+
+    /** מחזיר את החבילות שנכשלו. */
+    fun setSuspended(c: Context, pkgs: List<String>, on: Boolean): List<String> = try {
+        dpm(c).setPackagesSuspended(admin(c), pkgs.toTypedArray(), on).toList()
+    } catch (t: Throwable) {
+        VgLog.add("השעיה דרך Device Owner נכשלה: ${t.message}")
+        pkgs
     }
 }

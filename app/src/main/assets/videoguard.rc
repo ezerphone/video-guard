@@ -1,0 +1,5 @@
+# VideoGuard: filtered copy of the swcodec APEX codec list, bound over the original.
+# Removed by "Restore decoders" in the app (or delete this file and /system/etc/videoguard).
+# init.rc waits for apexd.status=activated in post-fs-data, before media services start.
+on property:apexd.status=activated
+    mount none /system/etc/videoguard/swcodec.xml /apex/com.android.media.swcodec/etc/media_codecs.xml bind

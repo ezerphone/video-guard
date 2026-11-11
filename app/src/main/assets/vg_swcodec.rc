@@ -1,9 +1,0 @@
-# VideoGuard. To remove: delete this file and /system/etc/vg (the app's "Cancel all" does it).
-on post-fs-data
-    exec - root root -- /system/bin/sh /system/etc/vg/boot_guard.sh pre
-
-on property:apexd.status=ready
-    mount none /system/etc/vg/swcodec.xml /apex/com.android.media.swcodec/etc/media_codecs.xml bind
-
-on property:sys.boot_completed=1
-    exec_background - root root -- /system/bin/sh /system/etc/vg/boot_guard.sh ok

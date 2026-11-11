@@ -1,35 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">שומר וידאו</string>
-
-    <string name="notif_title">הגנת וידאו פעילה</string>
-    <string name="notif_text">המסך נבדק באופן מקומי בלבד; שום תמונה אינה נשמרת או נשלחת.</string>
-
-    <string name="block_title">צפייה בוידאו חסומה</string>
-    <string name="block_text">זוהתה תנועת וידאו. ההגנה מונעת צפייה בסרטונים במכשיר זה.</string>
-    <string name="block_home">חזרה למסך הבית</string>
-
-    <string name="status_on">ההגנה פעילה</string>
-    <string name="status_off">ההגנה כבויה — הקש "הפעל הגנה"</string>
-    <string name="need_usage">דרושה הרשאת "גישה לנתוני שימוש" כדי לזהות את האפליקציה בחזית</string>
-    <string name="start_protection">הפעל / חדש הגנה</string>
-
-    <string name="list_mode_title">באילו אפליקציות לחסום</string>
-    <string name="mode_all">בכל האפליקציות</string>
-    <string name="mode_except">בכל האפליקציות חוץ מהמסומנות</string>
-    <string name="mode_only">רק באפליקציות המסומנות</string>
-    <string name="choose_apps">בחירת אפליקציות</string>
-
-    <string name="pin_title">קוד הגנה (למסך זה)</string>
-    <string name="set_pin">הגדרת קוד</string>
-    <string name="clear_pin">ביטול קוד</string>
-    <string name="enter_pin">הזן קוד</string>
-    <string name="pin_hint">לפחות 4 ספרות</string>
-
-    <string name="show_log">יומן פקודות</string>
-    <string name="log_title">יומן פקודות</string>
-    <string name="test_root">בדיקת root</string>
-    <string name="copy">העתק</string>
-    <string name="clear">נקה</string>
-    <string name="copied">הועתק</string>
+    <string name="app_name">חוסם וידאו</string>
 </resources>

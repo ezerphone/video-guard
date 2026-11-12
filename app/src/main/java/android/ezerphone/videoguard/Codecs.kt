@@ -102,37 +102,47 @@ object Codecs {
 
         val mps = todo.map { it.mp }.toSet() + mountPointOf("/system/etc")
         ui.say("יימחקו $total מפענחי וידאו מ-${todo.size} קבצים" + (if (swFiltered != null) " ומ-APEX swcodec" else ""))
-        Fs.makeWritable(mps)?.let { throw Fail(it, Fail.NOT_WRITABLE) }
-        ui.say("✓ המחיצות פתוחות לכתיבה")
+        var changed = false
         try {
+            // בתוך ה-try: אם רק חלק מהמחיצות נפתחו, ה-finally מחזיר אותן לקריאה בלבד
+            Fs.makeWritable(mps)?.let { throw Fail(it, Fail.NOT_WRITABLE) }
+            ui.say("✓ המחיצות פתוחות לכתיבה")
             for (x in todo) if (!Root.exists(x.bk)) {
                 if (!Root.run("mkdir -p '${x.bk.substringBeforeLast('/')}'").ok || !Root.writeText(c, x.bk, x.orig))
                     throw Fail("גיבוי של ${x.live} נכשל. לא נכתב כלום.")
             }
             ui.say("✓ גיבוי נוצר")
-            write(c, ui, todo, swFiltered)
+            changed = write(c, ui, todo, swFiltered)
         } finally {
             Root.run("sync")
             Fs.readOnlyAgain(mps)
         }
-        ui.say("✓ הושלם. השינוי ייכנס לתוקף אחרי אתחול.")
-        return true
+        ui.say(if (changed) "✓ הושלם. השינוי ייכנס לתוקף אחרי אתחול." else "✓ הכול כבר מסונן")
+        return changed
     }
 
-    private fun write(c: Context, ui: Ui, items: List<Item>, swFiltered: String?) {
+    /** מחזיר true אם משהו השתנה בפועל (צריך אתחול). */
+    private fun write(c: Context, ui: Ui, items: List<Item>, swFiltered: String?): Boolean {
         val written = ArrayList<Item>()
+        // הפעלה קודמת שהצליחה: אם הפעם משהו נכשל, לא מוחקים את מה שהיא יצרה
+        val hadRun = Root.exists(MARK)
+        var changed = false
         try {
             for (x in items) {
                 if (x.liveText == x.filtered) { ui.say("✓ ${x.live} כבר מסונן"); continue }
                 // נכנס לרשימה לפני הכתיבה: כתיבה שנכשלה באמצע משאירה קובץ ריק או חלקי, וגם אותו צריך להחזיר
                 written += x
                 if (!Root.writeText(c, x.live, x.filtered)) throw Fail("הכתיבה ל-${x.live} נכשלה")
+                changed = true
                 ui.say("✓ נכתב ${x.live}")
             }
             if (swFiltered != null) {
-                if (!Root.run("mkdir -p '$DIR'").ok || !Root.writeText(c, SW, swFiltered)) throw Fail("כתיבת $SW נכשלה")
                 val rc = c.assets.open("videoguard.rc").bufferedReader().use { it.readText() }
-                if (!Root.writeText(c, RC, rc)) throw Fail("יצירת $RC נכשלה")
+                if (Root.readText(SW) != swFiltered || Root.readText(RC) != rc) {
+                    if (!Root.run("mkdir -p '$DIR'").ok || !Root.writeText(c, SW, swFiltered)) throw Fail("כתיבת $SW נכשלה")
+                    if (!Root.writeText(c, RC, rc)) throw Fail("יצירת $RC נכשלה")
+                    changed = true
+                }
             }
             if (!Root.run("mkdir -p '$DIR'", "touch '$MARK'").ok) throw Fail("יצירת $MARK נכשלה")
             Root.run(
@@ -147,9 +157,10 @@ object Codecs {
                 if (!ok) allBack = false
                 ui.say(if (ok) "✓ הוחזר ${x.live}" else "✗ החזרת ${x.live} נכשלה! הגיבוי ב-${x.bk}")
             }
-            Root.run("rm -f '$RC' '$SW' '$MARK'")
+            if (!hadRun) Root.run("rm -f '$RC' '$SW' '$MARK'")
             throw if (allBack) f else Fail(f.message ?: "", Fail.HALFWAY)
         }
+        return changed
     }
 
     // ───────────────────────── שחזור ─────────────────────────
@@ -160,8 +171,8 @@ object Codecs {
         if (bks.isEmpty() && !Root.exists(RC)) { ui.say("○ אין מה לשחזר (לא נמצא גיבוי)"); Root.run("rm -f '$MARK'"); return }
 
         val mps = bks.map { mountPointOf(it.removePrefix(BK).substringBeforeLast('/')) }.toSet() + mountPointOf("/system/etc")
-        Fs.makeWritable(mps)?.let { throw Fail(it, Fail.NOT_WRITABLE) }
         try {
+            Fs.makeWritable(mps)?.let { throw Fail(it, Fail.NOT_WRITABLE) }
             for (bk in bks) {
                 val live = bk.removePrefix(BK)
                 val orig = Root.readText(bk) ?: throw Fail("קריאת הגיבוי $bk נכשלה. לא ממשיכים.", Fail.RESTORE_HALFWAY)

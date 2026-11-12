@@ -114,16 +114,24 @@ object Root {
      * כותב טקסט לקובץ: קודם לקובץ זמני בתיקיית האפליקציה, ואז לקובץ היעד (שומר הרשאות ו-SELinux
      * context של קובץ קיים), ואימות ב-cmp. מחזיר true רק אם התוכן בקובץ היעד זהה.
      *
-     * הקובץ מרוקן ו-sync לפני הכתיבה: מחיצות המערכת בנויות בלי מקום פנוי, וב-ext4 בלוקים שהתפנו
-     * לא זמינים לשימוש חוזר עד שהיומן נשמר. `cat > dst` ישיר נכשל שם ב-"No space left on device"
-     * גם כשהתוכן החדש קטן מהישן, ומשאיר קובץ ריק.
+     * מחיצות המערכת בנויות מלאות. לכן:
+     *  - תוכן שלא גדול מהקיים (סינון) נכתב *במקום* (dd בלי לרוקן, ואז קיצור לאורך החדש): לא צריך
+     *    בלוקים חדשים, והקובץ אף פעם לא מתרוקן — גם אם משהו נכשל באמצע.
+     *  - תוכן גדול יותר (שחזור, קובץ חדש): מרוקנים, sync, וכותבים. במחיצה מלאה זה עובד רק אחרי
+     *    ש-[Fs.makeWritable] שחרר את עתודת ext4.
      */
     fun writeText(c: Context, dst: String, text: String): Boolean {
         val tmp = File(c.cacheDir, "w-${System.nanoTime()}.tmp")
         return try {
             tmp.writeText(text, Charsets.UTF_8)
-            chain(": > '$dst'", "sync", "cat '${tmp.absolutePath}' >> '$dst'", "sync",
-                "cmp -s '${tmp.absolutePath}' '$dst'").ok
+            val src = tmp.absolutePath
+            val len = tmp.length()
+            val cur = quiet("stat -c %s '$dst' 2>/dev/null").firstOrNull()?.trim()?.toLongOrNull()
+            if (cur != null && len in 1..cur)
+                chain("dd if='$src' of='$dst' bs=4096 conv=notrunc 2>/dev/null", "truncate -s $len '$dst'", "sync",
+                    "cmp -s '$src' '$dst'").ok
+            else
+                chain(": > '$dst'", "sync", "cat '$src' >> '$dst'", "sync", "cmp -s '$src' '$dst'").ok
         } catch (t: Throwable) {
             VgLog.add("✗ כתיבה ל-$dst: ${t.message}")
             false

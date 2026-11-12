@@ -14,7 +14,7 @@ import android.widget.Toast
 /**
  * מריץ פעולה ארוכה ברקע. הפעולות לא שואלות שאלות: האישור נלקח לפני שהן מתחילות (חלון האישור
  * במסך הקודם). כך הפעולה ממשיכה גם אם יוצאים מהאפליקציה והיא ננעלת, והתוצאה מוצגת אחרי הזנת הקוד.
- * המשתמש רואה רק הודעה פשוטה; הפירוט הטכני נכתב ליומן ("מידע טכני").
+ * המשתמש רואה רק הודעה פשוטה; הפירוט הטכני נכתב ליומן (קובץ files/vg.log, נגיש רק עם root).
  */
 object TaskRunner {
     enum class Kind(val running: String, val wait: String) {
@@ -163,29 +163,4 @@ class TaskActivity : Guarded() {
             a.startActivity(Intent(a, TaskActivity::class.java))
         }
     }
-}
-
-/** "מידע טכני": יומן הפעולות המלא. */
-class LogActivity : Guarded() {
-    private lateinit var tv: android.widget.TextView
-
-    override fun build() {
-        val body = St.screen(this, "מידע טכני", back = true)
-        val bar = St.row(this)
-        bar.addView(St.button(this, "העתק", 'o', small = true) {
-            getSystemService(android.content.ClipboardManager::class.java)
-                .setPrimaryClip(android.content.ClipData.newPlainText("VideoGuard", VgLog.text()))
-            Toast.makeText(this, "הועתק", Toast.LENGTH_SHORT).show()
-        })
-        bar.addView(View(this), St.lp(St.dp(this, 8), 1))
-        bar.addView(St.button(this, "נקה", 'o', small = true) { VgLog.clear(); refresh() })
-        body.addView(bar)
-        tv = St.text(this, "", 12f, St.TEXT).apply {
-            setTextIsSelectable(true); textDirection = View.TEXT_DIRECTION_RTL
-            setPadding(0, St.dp(this@LogActivity, 12), 0, 0)
-        }
-        body.addView(tv)
-    }
-
-    override fun refresh() { tv.text = VgLog.text().ifEmpty { "(ריק)" } }
 }

@@ -37,8 +37,10 @@ class ScanService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        running = true
         startForeground(NOTIF_ID, notification(this))
+        // הפעלה מחדש אוטומטית (START_STICKY) אחרי שהמשתמש כיבה: לא סורקים, onStartCommand עוצר
+        if (!Prefs.serviceOn(this)) return
+        running = true
         registerReceiver(receiver, IntentFilter(Intent.ACTION_PACKAGE_ADDED).apply { addDataScheme("package") })
         VgLog.add("שירות הסריקה פועל")
         exec.execute { try { Scanner.catchUp(applicationContext) } catch (t: Throwable) { VgLog.add("שגיאה: ${t.message}") } }
@@ -50,6 +52,7 @@ class ScanService : Service() {
     }
 
     override fun onDestroy() {
+        if (!running) { exec.shutdown(); super.onDestroy(); return }
         running = false
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
         exec.shutdown()

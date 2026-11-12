@@ -58,11 +58,13 @@ class MainActivity : Guarded() {
         }
         body.addView(hero)
 
+        // הגובה של כל כרטיס זהה בכל מצב (אותו תיאור, אותו רוחב לכפתור/תגית, שורת האפליקציות תמיד
+        // מוצגת), כדי שהפעלה של משהו לא תגדיל את התוכן ותקטין בגללה את כל המסך.
+
         // ── חסימה במערכת ──
-        body.addView(card(R.drawable.ic_film, "חסימה במערכת",
-            if (blocked) "נגני הווידאו המובנים מושבתים" else "משבית את נגני הווידאו המובנים בטלפון",
+        body.addView(card(R.drawable.ic_film, "חסימה במערכת", "משבית את נגני הווידאו של הטלפון",
             when {
-                blocked && waiting -> St.chip(this, "ממתין להפעלה מחדש", St.PRIMARY, St.PRIMARY_SOFT)
+                blocked && waiting -> St.chip(this, "ממתין", St.PRIMARY, St.PRIMARY_SOFT)
                 blocked -> onChip()
                 else -> St.button(this, "הפעל", small = true) {
                     St.sheet(this, "להפעיל חסימה במערכת?",
@@ -72,22 +74,18 @@ class MainActivity : Guarded() {
             }))
 
         // ── בדיקת אפליקציות ──
-        body.addView(card(R.drawable.ic_apps, "בדיקת אפליקציות",
-            if (scanning) "כל אפליקציה חדשה נבדקת" else "כל אפליקציה חדשה נבדקת, ואם היא פותחת וידאו — נחסמת",
+        body.addView(card(R.drawable.ic_apps, "בדיקת אפליקציות", "חוסם אפליקציות שפותחות וידאו",
             if (scanning) onChip() else St.button(this, "הפעל", small = true) {
                 Prefs.setServiceOn(this, true); ScanService.start(applicationContext); refresh()
             }))
         val n = Prefs.suspended(this).size
-        if (scanning || n > 0) {
-            val l = St.list(this)
-            l.addView(St.listRow(this, if (n == 1) "אפליקציה אחת חסומה" else "$n אפליקציות חסומות",
-                end = St.icon(this, R.drawable.ic_chevron, 20)) { startActivity(Intent(this, AppsActivity::class.java)) })
-            body.addView(l, spaced())
-        }
+        val l = St.list(this)
+        l.addView(St.listRow(this, "אפליקציות חסומות: $n",
+            end = St.icon(this, R.drawable.ic_chevron, 20)) { startActivity(Intent(this, AppsActivity::class.java)) })
+        body.addView(l, spaced())
 
         // ── הגנה ──
-        body.addView(card(R.drawable.ic_lock, "הגנה",
-            if (prot) "אי אפשר להסיר את האפליקציה" else "מונע הסרה של האפליקציה ועקיפה של החסימה",
+        body.addView(card(R.drawable.ic_lock, "הגנה", "מונע את הסרת האפליקציה",
             if (prot) onChip() else St.button(this, "הפעל", small = true) {
                 St.sheet(this, "להפעיל הגנה?",
                     "אי אפשר יהיה להסיר את האפליקציה, וייחסמו גם הדברים שבחרת בהגדרות.\n" +
@@ -95,15 +93,25 @@ class MainActivity : Guarded() {
                         if (Prefs.lockAdb(this)) "\nחיבור למחשב (ADB) ייחסם מיד." else "",
                     "הפעל") { TaskActivity.start(this, TaskRunner.Kind.PROTECT) }
             }))
+
+        // ── קרדיט ──
+        body.addView(View(this), St.lp(h = 0, weight = 1f))
+        body.addView(St.text(this, "פותח ע״י $EMAIL\nלהכשרת נגנים, צריבת רוט ועוד ניתן ליצור קשר במייל", 12f, St.MUTED).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, St.dp(this@MainActivity, 20), 0, St.dp(this@MainActivity, 4))
+            setOnClickListener {
+                try { startActivity(Intent(Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:$EMAIL"))) } catch (_: Exception) {}
+            }
+        })
     }
 
     private fun onChip() = St.chip(this, "פועל", St.OK, St.OK_SOFT)
 
     private fun spaced() = St.lp().apply { topMargin = St.dp(this@MainActivity, 10) }
 
-    private fun card(icon: Int, title: String, desc: String, end: View): View {
+    /** כרטיס: אייקון, כותרת ותיאור, ובצד כפתור או תגית ברוחב קבוע. */
+    private fun card(icon: Int, title: String, desc: String, end: android.widget.TextView): View {
         val r = St.row(this)
-        r.gravity = Gravity.TOP
         r.background = St.round(this, St.SURFACE, 20)
         r.setPadding(St.dp(this, 16), St.dp(this, 14), St.dp(this, 16), St.dp(this, 14))
         r.addView(St.iconBox(this, icon, box = 40, size = 22, radius = 12))
@@ -113,10 +121,14 @@ class MainActivity : Guarded() {
             addView(St.text(this@MainActivity, desc, 13f, St.MUTED))
         }, St.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         r.addView(View(this), St.lp(St.dp(this, 10), 1))
-        r.addView(end)
+        end.gravity = Gravity.CENTER
+        end.setPadding(0, end.paddingTop, 0, end.paddingBottom)
+        r.addView(end, LinearLayout.LayoutParams(St.dp(this, 80), ViewGroup.LayoutParams.WRAP_CONTENT))
         r.layoutParams = spaced()
         return r
     }
+
+    companion object { const val EMAIL = "ezerphone0@gmail.com" }
 }
 
 /** אפליקציות חסומות ומותרות. */
@@ -238,12 +250,6 @@ class SettingsActivity : Guarded() {
             St.addRows(l, rows)
         })
 
-        body.addView(View(this), St.lp(h = 0, weight = 1f))
-        body.addView(St.text(this, "מידע טכני", 13f, St.MUTED).apply {
-            gravity = Gravity.CENTER; alpha = 0.8f
-            setPadding(0, St.dp(this@SettingsActivity, 28), 0, St.dp(this@SettingsActivity, 4))
-            setOnClickListener { startActivity(Intent(this@SettingsActivity, LogActivity::class.java)) }
-        })
     }
 
     private fun lockRow(t: String, on: Boolean, set: (Boolean) -> Unit) = St.listRow(this, t, end = St.toggle(this, on) { v ->

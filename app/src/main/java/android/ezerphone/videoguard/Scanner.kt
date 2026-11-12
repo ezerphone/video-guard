@@ -20,10 +20,10 @@ object Scanner {
     class Finding(val pkg: String, val label: String, val reasons: List<String>)
 
     /** בודק חבילה אחת. null = לא פותחת וידאו או לא נסרקת. */
-    fun check(c: Context, pkg: String): Finding? {
+    fun check(c: Context, pkg: String, skip: Set<String> = skipSet(c)): Finding? {
         val pm = c.packageManager
         val ai = try { pm.getApplicationInfo(pkg, 0) } catch (_: Exception) { return null }
-        if (!shouldScan(c, ai)) return null
+        if (!shouldScan(c, ai, skip)) return null
         val reasons = ArrayList<String>()
         if (opensVideo(c, pkg)) reasons += "פותחת קבצי וידאו"
         val libs = decoderLibs(ai)
@@ -42,10 +42,11 @@ object Scanner {
     /** סורק את כל האפליקציות המותקנות. מחזיר את מה שנמצא. */
     fun scanAll(c: Context, onProgress: (String) -> Unit = {}): List<Finding> {
         val apps = c.packageManager.getInstalledApplications(0)
+        val skip = skipSet(c)
         val found = ArrayList<Finding>()
         for (ai in apps) {
-            if (!shouldScan(c, ai)) continue
-            check(c, ai.packageName)?.let { found += it; onProgress("  ${it.label} — ${it.reasons.joinToString("; ")}") }
+            if (!shouldScan(c, ai, skip)) continue
+            check(c, ai.packageName, skip)?.let { found += it; onProgress("  ${it.label} — ${it.reasons.joinToString("; ")}") }
         }
         Prefs.setLastScan(c, System.currentTimeMillis())
         VgLog.add("סריקה מלאה: נמצאו ${found.size}")
@@ -58,12 +59,13 @@ object Scanner {
         val since = Prefs.lastScan(c) - 60_000L
         val now = System.currentTimeMillis()
         val pm = c.packageManager
+        val skip = skipSet(c)
         val changed = pm.getInstalledApplications(0).filter { ai ->
-            shouldScan(c, ai) && try { pm.getPackageInfo(ai.packageName, 0).lastUpdateTime >= since } catch (_: Exception) { false }
+            shouldScan(c, ai, skip) && try { pm.getPackageInfo(ai.packageName, 0).lastUpdateTime >= since } catch (_: Exception) { false }
         }
         if (Prefs.lastScan(c) == 0L) VgLog.add("שירות: סריקה ראשונה של כל האפליקציות")
         else if (changed.isNotEmpty()) VgLog.add("שירות: ${changed.size} אפליקציות הותקנו או עודכנו מאז הסריקה האחרונה")
-        val found = changed.mapNotNull { check(c, it.packageName) }
+        val found = changed.mapNotNull { check(c, it.packageName, skip) }
         if (found.isNotEmpty()) suspend(c, found)
         Prefs.setLastScan(c, now)
     }
@@ -95,12 +97,12 @@ object Scanner {
 
     // ───────────────────────── פנימי ─────────────────────────
 
-    private fun shouldScan(c: Context, ai: ApplicationInfo): Boolean {
-        val p = ai.packageName
-        if (p == c.packageName) return false
+    /** פטורות + מסכי בית ומקלדת. מחושב פעם אחת לכל סריקה (שאילתה לכל אפליקציה הייתה איטית מאוד). */
+    private fun skipSet(c: Context): Set<String> = Prefs.exempt(c) + essential(c) + c.packageName
+
+    private fun shouldScan(c: Context, ai: ApplicationInfo, skip: Set<String>): Boolean {
+        if (ai.packageName in skip) return false
         if (ai.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0) return false
-        if (p in Prefs.exempt(c)) return false
-        if (p in essential(c)) return false
         return true
     }
 

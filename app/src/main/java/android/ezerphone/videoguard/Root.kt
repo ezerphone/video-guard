@@ -111,14 +111,19 @@ object Root {
     } catch (_: Throwable) { null }
 
     /**
-     * כותב טקסט לקובץ: קודם לקובץ זמני בתיקיית האפליקציה, ואז `cat > dst` (שומר הרשאות ו-SELinux
+     * כותב טקסט לקובץ: קודם לקובץ זמני בתיקיית האפליקציה, ואז לקובץ היעד (שומר הרשאות ו-SELinux
      * context של קובץ קיים), ואימות ב-cmp. מחזיר true רק אם התוכן בקובץ היעד זהה.
+     *
+     * הקובץ מרוקן ו-sync לפני הכתיבה: מחיצות המערכת בנויות בלי מקום פנוי, וב-ext4 בלוקים שהתפנו
+     * לא זמינים לשימוש חוזר עד שהיומן נשמר. `cat > dst` ישיר נכשל שם ב-"No space left on device"
+     * גם כשהתוכן החדש קטן מהישן, ומשאיר קובץ ריק.
      */
     fun writeText(c: Context, dst: String, text: String): Boolean {
         val tmp = File(c.cacheDir, "w-${System.nanoTime()}.tmp")
         return try {
             tmp.writeText(text, Charsets.UTF_8)
-            chain("cat '${tmp.absolutePath}' > '$dst'", "cmp -s '${tmp.absolutePath}' '$dst'").ok
+            chain(": > '$dst'", "sync", "cat '${tmp.absolutePath}' >> '$dst'", "sync",
+                "cmp -s '${tmp.absolutePath}' '$dst'").ok
         } catch (t: Throwable) {
             VgLog.add("✗ כתיבה ל-$dst: ${t.message}")
             false

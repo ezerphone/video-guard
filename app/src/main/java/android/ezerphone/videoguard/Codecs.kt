@@ -116,8 +116,9 @@ object Codecs {
         try {
             for (x in items) {
                 if (x.liveText == x.filtered) { ui.say("✓ ${x.live} כבר מסונן"); continue }
-                if (!Root.writeText(c, x.live, x.filtered)) throw Fail("הכתיבה ל-${x.live} נכשלה")
+                // נכנס לרשימה לפני הכתיבה: כתיבה שנכשלה באמצע משאירה קובץ ריק או חלקי, וגם אותו צריך להחזיר
                 written += x
+                if (!Root.writeText(c, x.live, x.filtered)) throw Fail("הכתיבה ל-${x.live} נכשלה")
                 ui.say("✓ נכתב ${x.live}")
             }
             if (swFiltered != null) {
@@ -131,7 +132,8 @@ object Codecs {
             )
         } catch (f: Fail) {
             ui.say("✗ ${f.message}\nמחזיר את מה שנכתב...")
-            for (x in written) Root.writeText(c, x.live, x.orig)
+            for (x in written) ui.say(if (Root.writeText(c, x.live, x.orig)) "✓ הוחזר ${x.live}"
+                else "✗ החזרת ${x.live} נכשלה! הגיבוי ב-${x.bk}. לחץ \"שחזר מפענחים\" לפני אתחול.")
             Root.run("rm -f '$RC' '$SW'")
             throw f
         }

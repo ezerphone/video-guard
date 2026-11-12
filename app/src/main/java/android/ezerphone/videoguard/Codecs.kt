@@ -165,10 +165,11 @@ object Codecs {
 
     // ───────────────────────── שחזור ─────────────────────────
 
-    fun restore(c: Context, ui: Ui) {
+    /** מחזיר false אם לא היה מה לשחזר. */
+    fun restore(c: Context, ui: Ui): Boolean {
         if (!Root.available()) throw Fail("אין גישת root", Fail.NO_ROOT)
         val bks = Root.quiet("find '$BK' -type f -name 'media_codecs*.xml' 2>/dev/null").filter { it.startsWith("$BK/") }
-        if (bks.isEmpty() && !Root.exists(RC)) { ui.say("○ אין מה לשחזר (לא נמצא גיבוי)"); Root.run("rm -f '$MARK'"); return }
+        if (bks.isEmpty() && !Root.exists(RC) && !Root.exists(MARK)) { ui.say("○ אין מה לשחזר (לא נמצא גיבוי)"); return false }
 
         val mps = bks.map { mountPointOf(it.removePrefix(BK).substringBeforeLast('/')) }.toSet() + mountPointOf("/system/etc")
         try {
@@ -187,6 +188,7 @@ object Codecs {
             Fs.readOnlyAgain(mps)
         }
         ui.say("✓ הושלם. המפענחים יחזרו אחרי אתחול.")
+        return true
     }
 
     // ───────────────────────── עזר ─────────────────────────

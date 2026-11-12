@@ -9,7 +9,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** יומן: בזיכרון ובקובץ, מוצג במסך "יומן". כל שורה גם ל-logcat (תג VideoGuard). */
+/** יומן: בזיכרון ובקובץ files/vg.log (לא מוצג באפליקציה). כל שורה גם ל-logcat (תג VideoGuard). */
 object VgLog {
     private const val TAG = "VideoGuard"
     private const val MAX_LINES = 1500

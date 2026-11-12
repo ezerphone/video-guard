@@ -74,11 +74,10 @@ object TaskRunner {
             reboot = true; Prefs.setRebootBoot(c, bootCount(c))
             "החסימה תתחיל לפעול אחרי הפעלה מחדש של הטלפון."
         } else "נגני הווידאו כבר חסומים."
-        Kind.RESTORE -> {
-            Codecs.restore(c, log)
+        Kind.RESTORE -> if (Codecs.restore(c, log)) {
             reboot = true; Prefs.setRebootBoot(c, bootCount(c))
             "נגני הווידאו יחזרו לפעול אחרי הפעלה מחדש של הטלפון."
-        }
+        } else "אין מה להחזיר — נגני הווידאו לא חסומים."
         Kind.SCAN -> {
             val n = Scanner.scanAll(c).size
             if (n == 0) "לא נמצאו אפליקציות שפותחות וידאו." else "נמצאו ונחסמו $n אפליקציות שפותחות וידאו."

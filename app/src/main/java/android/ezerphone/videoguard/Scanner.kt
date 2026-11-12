@@ -70,6 +70,15 @@ object Scanner {
         Prefs.setLastScan(c, now)
     }
 
+    /** מוחק מהרשימות אפליקציות שכבר הוסרו מהטלפון (אחרת הן נשארות "חסומות" לתמיד). */
+    fun prune(c: Context) {
+        val pm = c.packageManager
+        fun gone(p: String) = try { pm.getApplicationInfo(p, 0); false } catch (_: Exception) { true }
+        val s = Prefs.suspended(c).filter(::gone)
+        if (s.isNotEmpty()) { Prefs.removeSuspended(c, s); s.forEach { Prefs.setReason(c, it, null) } }
+        Prefs.exempt(c).filter(::gone).forEach { Prefs.setExempt(c, it, false) }
+    }
+
     // ───────────────────────── השעיה ─────────────────────────
 
     fun suspend(c: Context, list: List<Finding>) {

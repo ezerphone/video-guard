@@ -78,6 +78,7 @@ class MainActivity : Guarded() {
             if (scanning) onChip() else St.button(this, "הפעל", small = true) {
                 Prefs.setServiceOn(this, true); ScanService.start(applicationContext); refresh()
             }))
+        Scanner.prune(this)
         val n = Prefs.suspended(this).size
         val l = St.list(this)
         l.addView(St.listRow(this, "אפליקציות חסומות: $n",
@@ -140,6 +141,7 @@ class AppsActivity : Guarded() {
 
     override fun refresh() {
         body.removeAllViews()
+        Scanner.prune(this)
         val blocked = Prefs.suspended(this).map { it to Scanner.label(this, it) }.sortedBy { it.second }
         val allowed = Prefs.exempt(this).map { it to Scanner.label(this, it) }.sortedBy { it.second }
 

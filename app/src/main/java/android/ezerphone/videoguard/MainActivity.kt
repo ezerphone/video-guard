@@ -98,7 +98,7 @@ class MainActivity : Guarded() {
 
     private fun onChip() = St.chip(this, "פועל", St.OK, St.OK_SOFT)
 
-    private fun spaced() = St.lp().apply { topMargin = St.dp(this, 12) }
+    private fun spaced() = St.lp().apply { topMargin = St.dp(this@MainActivity, 12) }
 
     private fun card(icon: Int, title: String, desc: String, end: View): View {
         val r = St.row(this)
@@ -162,13 +162,13 @@ class AppsActivity : Guarded() {
                         }
                     })
             })
-            body.addView(l, St.lp().apply { topMargin = St.dp(this, 12) })
+            body.addView(l, St.lp().apply { topMargin = St.dp(this@AppsActivity, 12) })
             if (tab == 0) body.addView(St.text(this, "אפליקציה שתתיר לא תיחסם שוב.", 13f, St.MUTED)
                 .apply { gravity = Gravity.CENTER; setPadding(0, St.dp(this@AppsActivity, 10), 0, 0) })
         }
         body.addView(View(this), St.lp(h = 0, weight = 1f))
         body.addView(St.button(this, "בדוק את כל האפליקציות עכשיו", 'o') { TaskActivity.start(this, TaskRunner.Kind.SCAN) },
-            St.lp().apply { topMargin = St.dp(this, 24) })
+            St.lp().apply { topMargin = St.dp(this@AppsActivity, 24) })
     }
 
     private fun appIcon(p: String): View = try {

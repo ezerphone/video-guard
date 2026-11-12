@@ -151,9 +151,25 @@ object St {
         root.addView(top)
         val body = col(a)
         body.setPadding(dp(a, 16), dp(a, 4), dp(a, 16), dp(a, 24))
-        root.addView(ScrollView(a).apply { isFillViewport = true; addView(body) }, lp(h = 0, weight = 1f))
+        root.addView(scroll(a, body), lp(h = 0, weight = 1f))
         a.setContentView(root)
         return body
+    }
+
+    /** רוחב מקסימלי לתוכן (טאבלט, מסך לרוחב): התוכן ממורכז ולא נמתח לכל הרוחב. */
+    const val MAX_WIDTH_DP = 560
+
+    /**
+     * עוטף תוכן בגלילה שממלאת את המסך: במסך קטן, בתצוגה לרוחב או עם גופן מוגדל שום דבר לא נחתך,
+     * ובמסך רחב התוכן ממורכז ברוחב של עד [MAX_WIDTH_DP].
+     */
+    fun scroll(c: Context, content: View): ScrollView {
+        val wide = c.resources.configuration.screenWidthDp > MAX_WIDTH_DP
+        val frame = FrameLayout(c)
+        frame.addView(content, FrameLayout.LayoutParams(
+            if (wide) dp(c, MAX_WIDTH_DP) else ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER_HORIZONTAL))
+        return ScrollView(c).apply { isFillViewport = true; addView(frame) }
     }
 
     private fun touch(c: Context, res: Int, f: () -> Unit) = FrameLayout(c).apply {
@@ -185,10 +201,12 @@ object St {
         v.addView(button(a, action, 'p', color = if (danger) BAD else PRIMARY) { d.dismiss(); f() })
         v.addView(button(a, "ביטול", 't') { d.dismiss() })
         v.layoutDirection = View.LAYOUT_DIRECTION_RTL
-        d.setContentView(v)
+        // גלילה: במסך נמוך (לרוחב) החלון לא נחתך
+        d.setContentView(ScrollView(a).apply { addView(v) })
         d.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            val wide = a.resources.configuration.screenWidthDp > MAX_WIDTH_DP
+            setLayout(if (wide) dp(a, MAX_WIDTH_DP) else ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             setGravity(Gravity.BOTTOM)
             addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         }

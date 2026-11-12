@@ -98,7 +98,7 @@ class TaskActivity : Guarded() {
 
     override fun build() {
         box = St.col(this)
-        setContentView(box)
+        setContentView(St.scroll(this, box))
     }
 
     override fun refresh() { h.removeCallbacks(tick); h.post(tick) }

@@ -20,6 +20,7 @@ class LockActivity : Activity() {
     private enum class Step { NEW, CONFIRM, ENTER }
 
     private var step = Step.ENTER
+    private var keyH = 68
     private var changing = false
     private var first = ""
     private val typed = StringBuilder()
@@ -35,19 +36,23 @@ class LockActivity : Activity() {
         changing = intent.getBooleanExtra("change", false) && Lock.unlocked
         step = if (changing || !Prefs.hasPin(this)) Step.NEW else Step.ENTER
 
+        // גדלים לפי גובה המסך: במסך נמוך (קטן, לרוחב, גופן מוגדל) הכול מתכווץ, ומעבר לזה נגלל
+        val h = resources.configuration.screenHeightDp
+        keyH = ((h - 330) / 4 - 12).coerceIn(48, 68)
         val root = St.col(this)
         root.gravity = Gravity.CENTER_HORIZONTAL
-        root.setPadding(0, St.dp(this, 72), 0, St.dp(this, 40))
-        lock = St.iconBox(this, R.drawable.ic_lock, bg = St.BG, box = 56, size = 48)
+        root.setPadding(0, (h * 0.08).toInt().coerceIn(16, 72).let { St.dp(this, it) }, 0, St.dp(this, if (h < 600) 16 else 40))
+        lock = St.iconBox(this, R.drawable.ic_lock, bg = St.BG, box = if (h < 600) 40 else 56, size = if (h < 600) 32 else 48)
         root.addView(lock)
         title = St.text(this, "", 24f, St.TEXT, true).apply { gravity = Gravity.CENTER; setPadding(0, St.dp(this@LockActivity, 18), 0, St.dp(this@LockActivity, 8)) }
         sub = St.text(this, "", 16f, St.MUTED).apply { gravity = Gravity.CENTER; setPadding(St.dp(this@LockActivity, 32), 0, St.dp(this@LockActivity, 32), 0) }
         root.addView(title); root.addView(sub)
         dots = St.row(this).apply { gravity = Gravity.CENTER; setPadding(0, St.dp(this@LockActivity, 26), 0, 0) }
         root.addView(dots)
-        root.addView(View(this), St.lp(h = 0, weight = 1f))
-        root.addView(keypad())
-        setContentView(root)
+        root.addView(View(this), St.lp(h = St.dp(this, 16), weight = 1f))
+        root.addView(keypad(), LinearLayout.LayoutParams(
+            minOf(resources.displayMetrics.widthPixels, St.dp(this, 420)), LinearLayout.LayoutParams.WRAP_CONTENT))
+        setContentView(St.scroll(this, root))
         render()
     }
 
@@ -63,10 +68,10 @@ class LockActivity : Activity() {
                     "⌫" -> St.button(this, "⌫", 't', color = St.TEXT) { if (typed.isNotEmpty()) { typed.setLength(typed.length - 1); render() } }
                     "ok" -> St.button(this, "", 't') { submit() }.also { action = it }
                     else -> St.button(this, k, 'o', color = St.TEXT) { if (typed.length < 8) { typed.append(k); render() } }
-                        .apply { textSize = 28f; typeface = android.graphics.Typeface.DEFAULT; background = St.round(this@LockActivity, St.SURFACE, 34) .let { android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x22000000), it, St.round(this@LockActivity, 0xFF000000.toInt(), 34)) } }
+                        .apply { textSize = if (keyH < 60) 24f else 28f; typeface = android.graphics.Typeface.DEFAULT; background = St.round(this@LockActivity, St.SURFACE, 34) .let { android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x22000000), it, St.round(this@LockActivity, 0xFF000000.toInt(), 34)) } }
                 }
                 if (k == "⌫") v.textSize = 26f
-                row.addView(v, LinearLayout.LayoutParams(0, St.dp(this, 68), 1f).apply {
+                row.addView(v, LinearLayout.LayoutParams(0, St.dp(this, keyH), 1f).apply {
                     setMargins(St.dp(this@LockActivity, 6), St.dp(this@LockActivity, 6), St.dp(this@LockActivity, 6), St.dp(this@LockActivity, 6))
                 })
             }

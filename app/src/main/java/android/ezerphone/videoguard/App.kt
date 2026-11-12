@@ -33,7 +33,7 @@ class BootReceiver : BroadcastReceiver() {
  *  - מסך הקוד ([LockActivity]) הוא היחיד שאפשר לפתוח מבחוץ. כל שאר המסכים יורשים מ-[Guarded],
  *    שבודק את הנעילה ב-onCreate, *לפני* שהתוכן נבנה, ואם נעול — עובר למסך הקוד.
  *  - ברגע שאף מסך של האפליקציה לא גלוי (Home, מעבר לאפליקציה אחרת, כיבוי מסך) האפליקציה ננעלת
- *    וכל המסכים שלה נסגרים, כולל המשימה ב"אחרונים". חזרה תמיד מתחילה ממסך הקוד.
+ *    וכל המסכים שלה נסגרים. היא נשארת ב"אחרונים", אבל לחיצה עליה פותחת מחדש את מסך הקוד.
  *  - FLAG_SECURE: התצוגה המקדימה ב"אחרונים" ריקה, ואי אפשר לצלם מסך.
  */
 object Lock {
@@ -66,7 +66,7 @@ object Lock {
 
     private fun lockNow() {
         unlocked = false
-        for (a in alive.toList()) if (!a.isFinishing) a.finishAndRemoveTask()
+        for (a in alive.toList()) if (!a.isFinishing) a.finish()
     }
 }
 

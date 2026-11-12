@@ -223,9 +223,30 @@ object Fs {
                 r.text.contains("shared", true) -> "המחיצה $mp משתמשת ב-shared_blocks ואי אפשר לפתוח אותה לכתיבה."
                 else -> "פתיחת $mp לכתיבה נכשלה:\n${r.text}"
             }
+            if (l.getOrNull(2) == "ext4") releaseReserve(dev)
         }
         return null
     }
 
-    fun readOnlyAgain(mps: Set<String>) { for (mp in mps) Root.run("mount -o remount,ro '$mp'") }
+    /**
+     * מחיצות המערכת בנויות מלאות (0 מקום פנוי), ו-ext4 שומר עתודה (reserved_clusters, עד 2% / 4096
+     * בלוקים) שאסורה לכתיבה רגילה — גם ל-root. לכן כל כתיבה ל-vendor נכשלת ב-"No space left on device",
+     * גם אחרי שהקובץ התרוקן. לזמן הכתיבה העתודה מאופסת, ו-[readOnlyAgain] מחזיר אותה.
+     */
+    private val savedReserve = LinkedHashMap<String, String>()
+
+    private fun releaseReserve(dev: String) {
+        val name = Root.quiet("readlink -f '$dev'").firstOrNull()?.trim()?.substringAfterLast('/') ?: return
+        val sys = "/sys/fs/ext4/$name/reserved_clusters"
+        if (sys in savedReserve) return
+        val v = Root.quiet("cat '$sys' 2>/dev/null").firstOrNull()?.trim() ?: return
+        if (v.toLongOrNull() == null || v == "0") return
+        if (Root.run("echo 0 > '$sys'").ok) { savedReserve[sys] = v; VgLog.add("עתודת ext4 ב-$name: $v → 0 (זמנית)") }
+    }
+
+    fun readOnlyAgain(mps: Set<String>) {
+        for ((sys, v) in savedReserve) Root.run("echo $v > '$sys'")
+        savedReserve.clear()
+        for (mp in mps) Root.run("mount -o remount,ro '$mp'")
+    }
 }

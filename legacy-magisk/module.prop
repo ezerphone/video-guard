@@ -1,6 +1,0 @@
-id=videoguard
-name=VideoGuard (visual video block + codec removal)
-version=v1.3
-versionCode=4
-author=ezerphone
-description=Blocks all video playback: removes system video decoders AND installs a privileged (non-accessibility) visual detector that covers players like VLC. Reversible by disabling the module.

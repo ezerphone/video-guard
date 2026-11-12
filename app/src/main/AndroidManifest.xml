@@ -3,42 +3,37 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
-        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 
     <application
         android:name=".VgApp"
-        android:persistent="true"
         android:allowBackup="false"
         android:icon="@drawable/ic_block"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!-- הכניסה היחידה: מסך הקוד. כל שאר המסכים פנימיים ונבנים רק אחרי קוד נכון. -->
         <activity
-            android:name=".MainActivity"
+            android:name=".LockActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
+        <activity android:name=".MainActivity" android:exported="false" />
         <activity
-            android:name=".AppListActivity"
+            android:name=".TaskActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode|density|fontScale|locale|layoutDirection"
             android:exported="false" />
+        <activity android:name=".AppsActivity" android:exported="false" />
+        <activity android:name=".SettingsActivity" android:exported="false" />
 
-        <activity
-            android:name=".LogActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".SetupActivity"
+        <service
+            android:name=".ScanService"
             android:exported="false" />
 
         <receiver
@@ -46,11 +41,12 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
         <receiver
-            android:name=".VgAdmin"
+            android:name=".AdminReceiver"
             android:exported="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <meta-data
@@ -60,18 +56,5 @@
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
             </intent-filter>
         </receiver>
-
-        <activity
-            android:name=".RequestActivity"
-            android:exported="false"
-            android:theme="@style/Transparent"
-            android:excludeFromRecents="true"
-            android:taskAffinity="" />
-
-        <service
-            android:name=".CaptureService"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
-        <!-- BootReceiver: טריגר האתחול היחיד (במקום service.sh של המודול הישן). -->
     </application>
 </manifest>

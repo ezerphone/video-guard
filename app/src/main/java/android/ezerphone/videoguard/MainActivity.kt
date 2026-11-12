@@ -1,223 +1,262 @@
 package android.ezerphone.videoguard
 
-import android.app.Activity
-import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
-import android.os.Bundle
-import android.text.InputType
 import android.view.Gravity
 import android.view.View
-import android.widget.Button
-import android.widget.EditText
+import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.Switch
-import android.widget.TextView
-import android.widget.Toast
+import java.io.File
 
-/** המסך הראשי: מתגי ההפעלה, "הפעל חסימה מלאה", הגבלות, אפליקציות, אבחון ו"בטל הכל". מוגן ב-PIN. */
-class MainActivity : Activity() {
+/** מה המצב עכשיו, בלי root (כדי שפתיחת המסך לא תקפיץ בקשת הרשאה). */
+object Status {
+    /** החסימה במערכת בוצעה (הסימון נכתב רק בסוף כתיבה מוצלחת). */
+    fun blocked() = File(Codecs.MARK).exists()
+    /** יש גיבוי של קבצי המערכת (גם אחרי פעולה שנעצרה באמצע) — אפשר להחזיר. */
+    fun canRestore() = blocked() || File(Codecs.BK).exists()
+    /** בוצע שינוי בקבצים ועוד לא הייתה הפעלה מחדש מאז. */
+    fun waitingReboot(c: Context) = Prefs.rebootBoot(c).let { it != -1 && it == TaskRunner.bootCount(c) }
+    fun scanning(c: Context) = Prefs.serviceOn(c)
+    fun protectedOn(c: Context) = Admin.isOwner(c)
+}
 
-    private lateinit var status: TextView
-    private var unlocked = false
-    private var openingChild = false // פתיחת מסך-משנה שלנו לא נועלת מחדש
+class MainActivity : Guarded() {
+    private lateinit var body: LinearLayout
+    override val autoFit = true
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(buildUi())
+    override fun build() {
+        body = St.screen(this, "חוסם וידאו", gear = { startActivity(Intent(this, SettingsActivity::class.java)) })
     }
 
-    override fun onResume() {
-        super.onResume()
-        openingChild = false
-        if (Prefs.hasPin(this) && !unlocked) { promptPin(); return }
-        refresh()
-    }
+    override fun refresh() {
+        if (TaskRunner.needsAttention()) { startActivity(Intent(this, TaskActivity::class.java)); return }
+        if (Prefs.serviceOn(this) && !ScanService.running) ScanService.start(applicationContext)
+        body.removeAllViews()
 
-    override fun onStop() {
-        super.onStop()
-        if (!openingChild && !isChangingConfigurations) unlocked = false
-    }
+        val blocked = Status.blocked()
+        val waiting = Status.waitingReboot(this)
+        val scanning = Status.scanning(this)
+        val prot = Status.protectedOn(this)
+        val on = listOf(blocked, scanning, prot).count { it }
 
-    private fun buildUi(): View {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(28), dp(24), dp(28))
+        // ── כרטיס מצב ──
+        val (heroIcon, heroBg, heroTitle, heroSub) = when {
+            on == 3 && !waiting -> listOf(R.drawable.ic_shield_on, St.OK_SOFT, "הווידאו חסום", "כל ההגנות פעילות")
+            on == 0 -> listOf(R.drawable.ic_shield_off, St.OFF_SOFT, "החסימה כבויה", "הפעל את מה שאתה צריך")
+            else -> listOf(R.drawable.ic_shield_part, St.PRIMARY_SOFT, "החסימה פועלת חלקית",
+                if (waiting) "צריך להפעיל מחדש את הטלפון" else "אפשר להפעיל עוד הגנות")
         }
-        root.addView(TextView(this).apply {
-            text = getString(R.string.app_name); textSize = 26f; setTextColor(Color.BLACK)
-        })
-        status = TextView(this).apply { textSize = 14f; setPadding(0, dp(10), 0, dp(16)) }
-        root.addView(status)
-
-        // ---- הפעלה ----
-        root.addView(sectionLabel("מה להפעיל"))
-        root.addView(sw("הפעל זיהוי חזותי", Prefs.visualOn(this)) { Prefs.setVisualOn(this, it) })
-        root.addView(sw("מחק רכיבי וידאו של המערכת", Prefs.codecsOn(this)) { Prefs.setCodecsOn(this, it) })
-        root.addView(sw("סריקת אפליקציות בכל אתחול ובכל התקנה חדשה", Prefs.scanOn(this)) { Prefs.setScanOn(this, it) })
-        root.addView(sw("חסום גם אפליקציות מערכת שמזוהה בהן וידאו", Prefs.blockSystem(this)) { Prefs.setBlockSystem(this, it) })
-        root.addView(btn("הפעל חסימה מלאה") {
-            if (!Prefs.hasPin(this)) askNewPin { launch("setup") } else launch("setup")
-        })
-
-        // ---- סריקה והשעיה ----
-        root.addView(sectionLabel("סריקה והשעיה"))
-        root.addView(sw("אכוף השעיה (כבוי = דיווח ליומן בלבד)", Prefs.enforce(this)) { on ->
-            if (on) {
-                AlertDialog.Builder(this)
-                    .setMessage("להפעיל אכיפה? אפליקציות שנתפסו בסריקה יושעו. כדאי קודם לעבור על רשימת האפליקציות ולסמן \"מותרת\" מה שצריך.")
-                    .setPositiveButton("הפעל") { _, _ ->
-                        Prefs.setEnforce(this, true)
-                        Thread({ Scanner.scanAndApply(applicationContext) }).start()
-                    }
-                    .setNegativeButton("בטל") { _, _ -> refreshAll() }
-                    .show()
-            } else {
-                Prefs.setEnforce(this, false)
-                Thread({ Scanner.releaseAll(applicationContext) }).start()
-            }
-        })
-        root.addView(btn("אפליקציות (רגילה / מותרת / מושעית)") { child(AppListActivity::class.java) })
-        root.addView(btn("סרוק עכשיו") {
-            Thread({
-                Scanner.scanAndApply(applicationContext)
-                runOnUiThread { Toast.makeText(this, "נמצאו ${Scanner.last.size} — פירוט ביומן", Toast.LENGTH_LONG).show() }
-            }).start()
-        })
-
-        // ---- הגבלות ----
-        root.addView(sectionLabel("הגבלות (Device Owner)"))
-        Prefs.RESTRICTIONS.forEach { r ->
-            root.addView(sw(r.label, Prefs.restr(this, r)) { Prefs.setRestr(this, r, it) })
+        val hero = St.row(this).apply {
+            background = St.round(this@MainActivity, heroBg as Int, 24)
+            setPadding(St.dp(this@MainActivity, 18), St.dp(this@MainActivity, 18), St.dp(this@MainActivity, 18), St.dp(this@MainActivity, 18))
+            addView(St.icon(this@MainActivity, heroIcon as Int, 44))
+            addView(View(this@MainActivity), St.lp(St.dp(this@MainActivity, 16), 1))
+            addView(St.col(this@MainActivity).apply {
+                addView(St.text(this@MainActivity, heroTitle as String, 22f, St.TEXT, true))
+                addView(St.text(this@MainActivity, heroSub as String, 15f, St.MUTED))
+            }, St.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
-        root.addView(sw("הסתר את אפליקציית Magisk (ליבת ה-root ממשיכה לפעול)", Prefs.hideMagisk(this)) { Prefs.setHideMagisk(this, it) })
-        root.addView(btn("החל הגבלות עכשיו") {
-            Thread({
-                val ok = Admin.isOwner(applicationContext)
-                if (ok) Admin.applyAll(applicationContext)
-                runOnUiThread { Toast.makeText(this, if (ok) "הוחלו" else "האפליקציה אינה Device Owner", Toast.LENGTH_SHORT).show() }
-            }).start()
-        })
+        body.addView(hero)
 
-        // ---- אבחון ----
-        root.addView(sectionLabel("אבחון"))
-        root.addView(btn("הפעל זיהוי חזותי עכשיו") {
-            Thread({ if (Root.available()) Guard.grantOps(applicationContext); Guard.startVisual(applicationContext) }).start()
-        })
-        root.addView(btn("בדוק מפענחי וידאו") {
-            Thread({
-                val r = Verify.run(applicationContext)
-                runOnUiThread { AlertDialog.Builder(this).setMessage(r.text).setPositiveButton("סגור", null).show(); refresh() }
-            }).start()
-        })
-        root.addView(btn("יומן פקודות") { child(LogActivity::class.java) })
+        // הגובה של כל כרטיס זהה בכל מצב (אותו תיאור, אותו רוחב לכפתור/תגית, שורת האפליקציות תמיד
+        // מוצגת), כדי שהפעלה של משהו לא תגדיל את התוכן ותקטין בגללה את כל המסך.
 
-        // ---- קוד ושחרור ----
-        root.addView(sectionLabel("קוד הגנה ושחרור"))
-        root.addView(btn("הגדרת / שינוי קוד") { askNewPin { refresh() } })
-        root.addView(btn("בטל הכל") {
-            if (Prefs.hasPin(this)) askPin { launch("undo") } else launch("undo")
-        }.apply { setTextColor(Color.parseColor("#B00020")) })
+        // ── חסימה במערכת ──
+        body.addView(card(R.drawable.ic_film, "חסימה במערכת", "משבית את נגני הווידאו של הטלפון",
+            when {
+                blocked && waiting -> St.chip(this, "ממתין", St.PRIMARY, St.PRIMARY_SOFT)
+                blocked -> onChip()
+                else -> St.button(this, "הפעל", small = true) {
+                    St.sheet(this, "להפעיל חסימה במערכת?",
+                        "נגני הווידאו המובנים בטלפון יושבתו. החסימה מתחילה אחרי הפעלה מחדש של הטלפון.\nאפשר לבטל בכל זמן מההגדרות.",
+                        "הפעל") { TaskActivity.start(this, TaskRunner.Kind.BLOCK) }
+                }
+            }))
 
-        return ScrollView(this).apply { addView(root) }
-    }
+        // ── בדיקת אפליקציות ──
+        body.addView(card(R.drawable.ic_apps, "בדיקת אפליקציות", "חוסם אפליקציות שפותחות וידאו",
+            if (scanning) onChip() else St.button(this, "הפעל", small = true) {
+                Prefs.setServiceOn(this, true); ScanService.start(applicationContext); refresh()
+            }))
+        Scanner.prune(this)
+        val n = Prefs.suspended(this).size
+        val l = St.list(this)
+        l.addView(St.listRow(this, "אפליקציות חסומות: $n",
+            end = St.icon(this, R.drawable.ic_chevron, 20)) { startActivity(Intent(this, AppsActivity::class.java)) })
+        body.addView(l, spaced())
 
-    private fun launch(mode: String) {
-        openingChild = true
-        startActivity(Intent(this, SetupActivity::class.java).putExtra("mode", mode))
-    }
+        // ── הגנה ──
+        body.addView(card(R.drawable.ic_lock, "הגנה", "מונע את הסרת האפליקציה",
+            if (prot) onChip() else St.button(this, "הפעל", small = true) {
+                St.sheet(this, "להפעיל הגנה?",
+                    "אי אפשר יהיה להסיר את האפליקציה, וייחסמו גם הדברים שבחרת בהגדרות.\n" +
+                        "לפני כן צריך להסיר מהטלפון את כל החשבונות (כמו חשבון Google). אפשר להוסיף אותם בחזרה אחר כך." +
+                        if (Prefs.lockAdb(this)) "\nחיבור למחשב (ADB) ייחסם מיד." else "",
+                    "הפעל") { TaskActivity.start(this, TaskRunner.Kind.PROTECT) }
+            }))
 
-    private fun child(cls: Class<*>) {
-        openingChild = true
-        startActivity(Intent(this, cls))
-    }
-
-    private fun refreshAll() { recreate() }
-
-    private fun refresh() {
-        val run = CaptureService.running && CaptureService.hasProjection
-        val issues = Integrity.check(this)
-        status.text = buildString {
-            append(if (run) "● זיהוי חזותי פעיל" else "○ זיהוי חזותי כבוי")
-            append("\nDevice Owner: ").append(if (Admin.isOwner(this@MainActivity)) "כן" else "לא")
-            val v = Prefs.lastVerify(this@MainActivity)
-            if (v.isNotEmpty()) append("\nבדיקה אחרונה: ").append(v)
-            if (issues.isNotEmpty()) {
-                append("\n\n⚠ ההגנה לא שלמה, נדרשת הגדרה מחדש:\n")
-                append(issues.joinToString("\n") { "• $it" })
+        // ── קרדיט ──
+        body.addView(View(this), St.lp(h = 0, weight = 1f))
+        body.addView(St.text(this, "פותח ע״י $EMAIL\nלהכשרת נגנים, צריבת רוט ועוד ניתן ליצור קשר במייל", 12f, St.MUTED).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, St.dp(this@MainActivity, 20), 0, St.dp(this@MainActivity, 4))
+            setOnClickListener {
+                try { startActivity(Intent(Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:$EMAIL"))) } catch (_: Exception) {}
             }
+        })
+    }
+
+    private fun onChip() = St.chip(this, "פועל", St.OK, St.OK_SOFT)
+
+    private fun spaced() = St.lp().apply { topMargin = St.dp(this@MainActivity, 10) }
+
+    /** כרטיס: אייקון, כותרת ותיאור, ובצד כפתור או תגית ברוחב קבוע. */
+    private fun card(icon: Int, title: String, desc: String, end: android.widget.TextView): View {
+        val r = St.row(this)
+        r.background = St.round(this, St.SURFACE, 20)
+        r.setPadding(St.dp(this, 16), St.dp(this, 14), St.dp(this, 16), St.dp(this, 14))
+        r.addView(St.iconBox(this, icon, box = 40, size = 22, radius = 12))
+        r.addView(View(this), St.lp(St.dp(this, 14), 1))
+        r.addView(St.col(this).apply {
+            addView(St.text(this@MainActivity, title, 16f, St.TEXT, true))
+            addView(St.text(this@MainActivity, desc, 13f, St.MUTED))
+        }, St.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        r.addView(View(this), St.lp(St.dp(this, 10), 1))
+        end.gravity = Gravity.CENTER
+        end.setPadding(0, end.paddingTop, 0, end.paddingBottom)
+        r.addView(end, LinearLayout.LayoutParams(St.dp(this, 80), ViewGroup.LayoutParams.WRAP_CONTENT))
+        r.layoutParams = spaced()
+        return r
+    }
+
+    companion object { const val EMAIL = "ezerphone0@gmail.com" }
+}
+
+/** אפליקציות חסומות ומותרות. */
+class AppsActivity : Guarded() {
+    private lateinit var body: LinearLayout
+    private var tab = 0
+
+    override fun build() { body = St.screen(this, "אפליקציות", back = true) }
+
+    override fun refresh() {
+        body.removeAllViews()
+        Scanner.prune(this)
+        val blocked = Prefs.suspended(this).map { it to Scanner.label(this, it) }.sortedBy { it.second }
+        val allowed = Prefs.exempt(this).map { it to Scanner.label(this, it) }.sortedBy { it.second }
+
+        val tabs = St.row(this).apply { background = St.round(this@AppsActivity, St.OFF_SOFT, 24); setPadding(St.dp(this@AppsActivity, 4), St.dp(this@AppsActivity, 4), St.dp(this@AppsActivity, 4), St.dp(this@AppsActivity, 4)) }
+        listOf("חסומות (${blocked.size})", "מותרות (${allowed.size})").forEachIndexed { i, t ->
+            tabs.addView(St.text(this, t, 15f, if (i == tab) St.TEXT else St.MUTED, i == tab).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, St.dp(this@AppsActivity, 10), 0, St.dp(this@AppsActivity, 10))
+                if (i == tab) background = St.round(this@AppsActivity, St.SURFACE, 20)
+                setOnClickListener { tab = i; refresh() }
+            }, St.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
-        status.setTextColor(if (issues.isNotEmpty()) Color.parseColor("#B00020")
-            else if (run) Color.parseColor("#1B873F") else Color.DKGRAY)
-    }
+        body.addView(tabs)
 
-    // ---- קוד ----
-
-    private fun pinField(hint: String) = EditText(this).apply {
-        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
-        this.hint = hint
-    }
-
-    private fun askNewPin(done: () -> Unit) {
-        val a = pinField(getString(R.string.pin_hint))
-        val b = pinField("שוב, לאישור")
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), 0)
-            addView(a); addView(b)
+        val items = if (tab == 0) blocked else allowed
+        if (items.isEmpty()) {
+            body.addView(St.text(this, if (tab == 0) "אין אפליקציות חסומות" else "אין אפליקציות מותרות", 15f, St.MUTED)
+                .apply { gravity = Gravity.CENTER; setPadding(0, St.dp(this@AppsActivity, 40), 0, St.dp(this@AppsActivity, 40)) })
+        } else {
+            val l = St.list(this)
+            St.addRows(l, items.map { (p, label) ->
+                if (tab == 0) St.listRow(this, label, "חסומה", lead = appIcon(p),
+                    end = St.button(this, "התר", 'o', small = true) {
+                        St.sheet(this, "להתיר את $label?", "היא לא תיחסם שוב. אפשר לחסום אותה מחדש בלשונית \"מותרות\".", "התר") {
+                            work { Prefs.setExempt(applicationContext, p, true); Scanner.unsuspend(applicationContext, listOf(p)) }
+                        }
+                    })
+                else St.listRow(this, label, "מותרת", lead = appIcon(p),
+                    end = St.button(this, "חסום", 'o', small = true) {
+                        work {
+                            Prefs.setExempt(applicationContext, p, false)
+                            Scanner.suspend(applicationContext, listOf(Scanner.Finding(p, label, listOf("נחסמה ידנית"))))
+                        }
+                    })
+            })
+            body.addView(l, St.lp().apply { topMargin = St.dp(this@AppsActivity, 12) })
+            if (tab == 0) body.addView(St.text(this, "אפליקציה שתתיר לא תיחסם שוב.", 13f, St.MUTED)
+                .apply { gravity = Gravity.CENTER; setPadding(0, St.dp(this@AppsActivity, 10), 0, 0) })
         }
-        AlertDialog.Builder(this)
-            .setTitle("הגדרת קוד הגנה")
-            .setMessage("הקוד נדרש לכניסה להגדרות. אם תשכח אותו, \"בטל הכל\" לא יעבוד.")
-            .setView(box)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                val p = a.text.toString()
-                if (p.length >= 4 && p == b.text.toString()) { Prefs.setPin(this, p); unlocked = true; done() }
-                else Toast.makeText(this, "הקוד קצר מ-4 ספרות או שלא תואם", Toast.LENGTH_LONG).show()
+        body.addView(View(this), St.lp(h = 0, weight = 1f))
+        body.addView(St.button(this, "בדוק את כל האפליקציות עכשיו", 'o') { TaskActivity.start(this, TaskRunner.Kind.SCAN) },
+            St.lp().apply { topMargin = St.dp(this@AppsActivity, 24) })
+    }
+
+    private fun appIcon(p: String): View = try {
+        android.widget.ImageView(this).apply {
+            setImageDrawable(packageManager.getApplicationIcon(p))
+            layoutParams = LinearLayout.LayoutParams(St.dp(this@AppsActivity, 44), St.dp(this@AppsActivity, 44))
+        }
+    } catch (_: Exception) { St.iconBox(this, R.drawable.ic_apps, radius = 12) }
+
+    private fun work(f: () -> Unit) = Root.bg("vg-apps") {
+        try { f() } catch (t: Throwable) { VgLog.add("✗ ${t.message}") }
+        runOnUiThread { if (!isFinishing) refresh() }
+    }
+}
+
+class SettingsActivity : Guarded() {
+    private lateinit var body: LinearLayout
+    override val autoFit = true
+
+    override fun build() { body = St.screen(this, "הגדרות", back = true) }
+
+    override fun refresh() {
+        body.removeAllViews()
+        val chev = { St.icon(this, R.drawable.ic_chevron, 20) }
+
+        body.addView(St.group(this, "קוד"))
+        body.addView(St.list(this).also { l ->
+            l.addView(St.listRow(this, "שינוי קוד", end = chev()) {
+                startActivity(Intent(this, LockActivity::class.java).putExtra("change", true))
+            })
+        })
+
+        body.addView(St.group(this, "בדיקת אפליקציות"))
+        body.addView(St.list(this).also { l ->
+            St.addRows(l, listOf(
+                St.listRow(this, "בדיקת אפליקציות חדשות", end = St.toggle(this, Prefs.serviceOn(this)) { v ->
+                    Prefs.setServiceOn(this, v)
+                    if (v) ScanService.start(applicationContext) else ScanService.stop(applicationContext)
+                }),
+                St.listRow(this, "אפליקציות חסומות ומותרות", end = chev()) { startActivity(Intent(this, AppsActivity::class.java)) }
+            ))
+        })
+
+        body.addView(St.group(this, "הגנה"))
+        body.addView(St.list(this).also { l ->
+            St.addRows(l, listOf(
+                lockRow("מנע מצב בטוח", Prefs.lockSafeBoot(this)) { Prefs.setLockSafeBoot(this, it) },
+                lockRow("מנע איפוס יצרן", Prefs.lockFactoryReset(this)) { Prefs.setLockFactoryReset(this, it) },
+                lockRow("מנע חיבור למחשב (ADB)", Prefs.lockAdb(this)) { Prefs.setLockAdb(this, it) }
+            ))
+        })
+
+        body.addView(St.group(this, "ביטול"))
+        body.addView(St.list(this).also { l ->
+            val rows = ArrayList<View>()
+            if (Status.canRestore()) rows += St.listRow(this, "החזר את נגני הווידאו") {
+                St.sheet(this, "להחזיר את נגני הווידאו?", "החסימה במערכת תבוטל אחרי הפעלה מחדש של הטלפון.", "החזר") {
+                    TaskActivity.start(this, TaskRunner.Kind.RESTORE)
+                }
             }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun askPin(onOk: () -> Unit) {
-        val input = pinField("")
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.enter_pin)).setView(input)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                if (Prefs.verify(this, input.text.toString())) onOk()
-                else Toast.makeText(this, "קוד שגוי", Toast.LENGTH_SHORT).show()
+            if (Status.protectedOn(this)) rows += St.listRow(this, "בטל את כל ההגנה", "אפשר יהיה להסיר את האפליקציה", titleColor = St.BAD) {
+                St.sheet(this, "לבטל את ההגנה?", "כל האפליקציות החסומות ישוחררו, ואפשר יהיה להסיר את האפליקציה. החסימה במערכת לא משתנה.",
+                    "בטל הגנה", danger = true) { TaskActivity.start(this, TaskRunner.Kind.UNPROTECT) }
             }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            if (rows.isEmpty()) rows += St.listRow(this, "אין מה לבטל", titleColor = St.MUTED)
+            St.addRows(l, rows)
+        })
+
     }
 
-    private fun promptPin() {
-        val input = pinField("")
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.enter_pin)).setView(input).setCancelable(false)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
-                if (Prefs.verify(this, input.text.toString())) { unlocked = true; refresh() } else finish()
-            }
-            .setNegativeButton(android.R.string.cancel) { _, _ -> finish() }
-            .show()
-    }
-
-    // ---- עזרי UI ----
-
-    private fun sw(label: String, checked: Boolean, onChange: (Boolean) -> Unit) = Switch(this).apply {
-        text = label; isChecked = checked; setPadding(0, dp(6), 0, dp(6))
-        setOnCheckedChangeListener { _, v -> onChange(v) }
-    }
-
-    private fun btn(label: String, onClick: () -> Unit) = Button(this).apply {
-        text = label; setOnClickListener { onClick() }
-    }
-
-    private fun sectionLabel(t: String) = TextView(this).apply {
-        text = t; textSize = 17f; setTextColor(Color.BLACK)
-        setPadding(0, dp(24), 0, dp(8)); gravity = Gravity.START
-    }
-
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun lockRow(t: String, on: Boolean, set: (Boolean) -> Unit) = St.listRow(this, t, end = St.toggle(this, on) { v ->
+        set(v)
+        val app = applicationContext
+        if (Admin.isOwner(app)) Root.bg { Admin.applyLocks(app) }
+    })
 }

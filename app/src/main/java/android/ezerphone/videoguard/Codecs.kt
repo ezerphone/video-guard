@@ -10,7 +10,18 @@ interface Ui {
     fun confirm(msg: String): Boolean
 }
 
-class Fail(msg: String) : Exception(msg)
+/**
+ * כישלון של פעולה. [message] = הפירוט הטכני (נכתב ליומן). [friendly] = מה שהמשתמש רואה.
+ */
+class Fail(msg: String, val friendly: String = NO_CHANGE) : Exception(msg) {
+    companion object {
+        const val NO_CHANGE = "לא בוצע שום שינוי בטלפון.\nאפשר לנסות שוב מאוחר יותר."
+        const val NO_ROOT = "אין הרשאת root. אשר את הבקשה של Magisk ונסה שוב."
+        const val HALFWAY = "הפעולה נעצרה באמצע.\nלפני הפעלה מחדש של הטלפון, היכנס להגדרות ובחר \"החזר את נגני הווידאו\"."
+        const val RESTORE_HALFWAY = "החזרת נגני הווידאו לא הושלמה.\nאל תפעיל מחדש את הטלפון — נסה שוב."
+        const val NOT_WRITABLE = "אי אפשר לשנות את קבצי המערכת בטלפון הזה.\nלא בוצע שום שינוי."
+    }
+}
 
 /**
  * מחיקת מפענחי וידאו בכתיבה ישירה למחיצות, ושחזור.
@@ -25,10 +36,11 @@ object Codecs {
     const val BK = "$DIR/backup"
     const val SW = "$DIR/swcodec.xml"
     const val RC = "/system/etc/init/videoguard.rc"
+    /** נכתב רק בסוף כתיבה מוצלחת; קריא גם בלי root. */
+    const val MARK = "$DIR/applied"
     const val APEX_XML = "/apex/com.android.media.swcodec/etc/media_codecs.xml"
     private val PARTS = listOf("vendor", "odm", "product", "system_ext", "system")
 
-    fun applied() = Root.exists(RC)
 
     /** מפענחי הווידאו שאפליקציות רואות בפועל (מה שהמערכת מחזירה ל-MediaCodecList). בלי root. */
     fun visibleVideoDecoders(): List<String> = try {
@@ -43,8 +55,9 @@ object Codecs {
         var filtered = ""
     }
 
-    fun remove(c: Context, ui: Ui) {
-        if (!Root.available()) throw Fail("אין גישת root. אשר את הבקשה ב-Magisk ונסה שוב.")
+    /** מחזיר true אם נכתב שינוי (צריך אתחול), false אם לא היה מה למחוק. */
+    fun remove(c: Context, ui: Ui): Boolean {
+        if (!Root.available()) throw Fail("אין גישת root", Fail.NO_ROOT)
 
         ui.say("▶ קורא את קבצי המפענחים")
         val lives = listLiveFiles()
@@ -85,16 +98,11 @@ object Codecs {
                 ui.say("  APEX swcodec: ${r.removed.size} מפענחי וידאו (דרך עותק מסונן)")
             }
         }
-        if (todo.isEmpty() && swFiltered == null) { ui.say("✓ לא נמצאו מפענחי וידאו למחיקה"); return }
+        if (todo.isEmpty() && swFiltered == null) { ui.say("✓ לא נמצאו מפענחי וידאו למחיקה"); return false }
 
         val mps = todo.map { it.mp }.toSet() + mountPointOf("/system/etc")
-        if (!ui.confirm(
-                "יימחקו $total מפענחי וידאו מ-${todo.size} קבצים" + (if (swFiltered != null) " ומ-APEX swcodec" else "") + ".\n\n" +
-                    "המחיצות ייפתחו לכתיבה: ${mps.joinToString()}.\n" +
-                    "לפני הכתיבה המקור נשמר ב-$BK, ואפשר להחזיר אותו בכפתור \"שחזר מפענחים\".\n\nלהמשיך?"
-            )) throw Fail("בוטל. לא שונה כלום.")
-
-        Fs.makeWritable(mps)?.let { throw Fail(it) }
+        ui.say("יימחקו $total מפענחי וידאו מ-${todo.size} קבצים" + (if (swFiltered != null) " ומ-APEX swcodec" else ""))
+        Fs.makeWritable(mps)?.let { throw Fail(it, Fail.NOT_WRITABLE) }
         ui.say("✓ המחיצות פתוחות לכתיבה")
         try {
             for (x in todo) if (!Root.exists(x.bk)) {
@@ -108,7 +116,7 @@ object Codecs {
             Fs.readOnlyAgain(mps)
         }
         ui.say("✓ הושלם. השינוי ייכנס לתוקף אחרי אתחול.")
-        if (ui.confirm("לאתחל עכשיו?")) reboot()
+        return true
     }
 
     private fun write(c: Context, ui: Ui, items: List<Item>, swFiltered: String?) {
@@ -126,35 +134,39 @@ object Codecs {
                 val rc = c.assets.open("videoguard.rc").bufferedReader().use { it.readText() }
                 if (!Root.writeText(c, RC, rc)) throw Fail("יצירת $RC נכשלה")
             }
+            if (!Root.run("mkdir -p '$DIR'", "touch '$MARK'").ok) throw Fail("יצירת $MARK נכשלה")
             Root.run(
                 "find '$DIR' -type d -exec chmod 755 {} +", "find '$DIR' -type f -exec chmod 644 {} +",
                 "chcon -R u:object_r:system_file:s0 '$DIR'", "[ -f '$RC' ] && chmod 644 '$RC' && chcon u:object_r:system_file:s0 '$RC'; true"
             )
         } catch (f: Fail) {
             ui.say("✗ ${f.message}\nמחזיר את מה שנכתב...")
-            for (x in written) ui.say(if (Root.writeText(c, x.live, x.orig)) "✓ הוחזר ${x.live}"
-                else "✗ החזרת ${x.live} נכשלה! הגיבוי ב-${x.bk}. לחץ \"שחזר מפענחים\" לפני אתחול.")
-            Root.run("rm -f '$RC' '$SW'")
-            throw f
+            var allBack = true
+            for (x in written) {
+                val ok = Root.writeText(c, x.live, x.orig)
+                if (!ok) allBack = false
+                ui.say(if (ok) "✓ הוחזר ${x.live}" else "✗ החזרת ${x.live} נכשלה! הגיבוי ב-${x.bk}")
+            }
+            Root.run("rm -f '$RC' '$SW' '$MARK'")
+            throw if (allBack) f else Fail(f.message ?: "", Fail.HALFWAY)
         }
     }
 
     // ───────────────────────── שחזור ─────────────────────────
 
     fun restore(c: Context, ui: Ui) {
-        if (!Root.available()) throw Fail("אין גישת root.")
+        if (!Root.available()) throw Fail("אין גישת root", Fail.NO_ROOT)
         val bks = Root.quiet("find '$BK' -type f -name 'media_codecs*.xml' 2>/dev/null").filter { it.startsWith("$BK/") }
-        if (bks.isEmpty() && !Root.exists(RC)) { ui.say("○ אין מה לשחזר (לא נמצא גיבוי)"); return }
-        if (!ui.confirm("לשחזר את מפענחי הווידאו?\n\nהקבצים המקוריים יחזרו מהגיבוי, ואחר כך צריך לאתחל.")) throw Fail("בוטל.")
+        if (bks.isEmpty() && !Root.exists(RC)) { ui.say("○ אין מה לשחזר (לא נמצא גיבוי)"); Root.run("rm -f '$MARK'"); return }
 
         val mps = bks.map { mountPointOf(it.removePrefix(BK).substringBeforeLast('/')) }.toSet() + mountPointOf("/system/etc")
-        Fs.makeWritable(mps)?.let { throw Fail(it) }
+        Fs.makeWritable(mps)?.let { throw Fail(it, Fail.NOT_WRITABLE) }
         try {
             for (bk in bks) {
                 val live = bk.removePrefix(BK)
-                val orig = Root.readText(bk) ?: throw Fail("קריאת הגיבוי $bk נכשלה. לא ממשיכים.")
+                val orig = Root.readText(bk) ?: throw Fail("קריאת הגיבוי $bk נכשלה. לא ממשיכים.", Fail.RESTORE_HALFWAY)
                 if (Root.readText(live) == orig) { ui.say("✓ $live כבר מקורי"); continue }
-                if (!Root.writeText(c, live, orig)) throw Fail("שחזור $live נכשל. הגיבוי לא נמחק.")
+                if (!Root.writeText(c, live, orig)) throw Fail("שחזור $live נכשל. הגיבוי לא נמחק.", Fail.RESTORE_HALFWAY)
                 ui.say("✓ שוחזר $live")
             }
             Root.run("rm -f '$RC'", "rm -rf '$DIR'")
@@ -164,7 +176,6 @@ object Codecs {
             Fs.readOnlyAgain(mps)
         }
         ui.say("✓ הושלם. המפענחים יחזרו אחרי אתחול.")
-        if (ui.confirm("לאתחל עכשיו?")) reboot()
     }
 
     // ───────────────────────── עזר ─────────────────────────

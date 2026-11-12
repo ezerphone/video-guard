@@ -19,20 +19,20 @@ object Admin {
 
     fun isOwner(c: Context) = try { dpm(c).isDeviceOwnerApp(c.packageName) } catch (_: Exception) { false }
 
-    /** מפעיל את ההגנה. null = הצליח, אחרת הסבר. */
-    fun protect(c: Context, ui: Ui): String? {
+    /** מפעיל את ההגנה. נכשל ב-[Fail] עם הסבר פשוט. */
+    fun protect(c: Context, ui: Ui) {
         if (!isOwner(c)) {
-            if (!Root.available()) return "אין גישת root."
+            if (!Root.available()) throw Fail("אין גישת root", Fail.NO_ROOT)
             ui.say("▶ הופך ל-Device Owner")
             val r = Root.run("dpm set-device-owner ${c.packageName}/.AdminReceiver")
             if (!isOwner(c)) {
                 val t = r.text
-                return when {
-                    t.contains("account", true) ->
-                        "יש חשבונות במכשיר (Google ואחרים). צריך להסיר את כולם בהגדרות > חשבונות, ואז לנסות שוב. אפשר להוסיף אותם בחזרה אחרי ההפעלה.\n\n$t"
-                    t.contains("user", true) ->
-                        "יש במכשיר משתמשים נוספים או פרופיל עבודה. צריך להסיר אותם ולנסות שוב.\n\n$t"
-                    else -> "ההפעלה כ-Device Owner נכשלה:\n$t"
+                throw when {
+                    t.contains("account", true) -> Fail(t,
+                        "יש חשבונות בטלפון.\nהסר אותם בהגדרות > חשבונות ונסה שוב. אפשר להוסיף אותם בחזרה אחרי ההפעלה.")
+                    t.contains("user", true) -> Fail(t,
+                        "יש בטלפון משתמשים נוספים או פרופיל עבודה.\nהסר אותם ונסה שוב.")
+                    else -> Fail(t, "לא הצלחנו להפעיל את ההגנה.\nלא בוצע שום שינוי בטלפון.")
                 }
             }
             ui.say("✓ Device Owner פעיל")
@@ -41,7 +41,6 @@ object Admin {
         // השעיות שנעשו קודם דרך root עוברות ל-Device Owner
         val ours = Prefs.suspended(c)
         if (ours.isNotEmpty()) setSuspended(c, ours.toList(), true)
-        return null
     }
 
     /** מחיל את חסימת ההסרה ואת שלושת המתגים. מחזיר שורות סטטוס. */

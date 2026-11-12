@@ -80,7 +80,7 @@ class ScanService : Service() {
         }
 
         private fun openApp(c: Context) = PendingIntent.getActivity(
-            c, 0, Intent(c, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+            c, 0, Intent(c, LockActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
 
         /**

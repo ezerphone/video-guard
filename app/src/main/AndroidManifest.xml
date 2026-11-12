@@ -15,21 +15,22 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!-- הכניסה היחידה: מסך הקוד. כל שאר המסכים פנימיים ונבנים רק אחרי קוד נכון. -->
         <activity
-            android:name=".MainActivity"
+            android:name=".LockActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- סיבוב מסך לא יוצר את המסך מחדש: הפעולה רצה ב-thread שמחזיק את המסך הזה -->
+        <activity android:name=".MainActivity" android:exported="false" />
         <activity
             android:name=".TaskActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode|density|fontScale|locale|layoutDirection"
             android:exported="false" />
         <activity android:name=".AppsActivity" android:exported="false" />
+        <activity android:name=".SettingsActivity" android:exported="false" />
         <activity android:name=".LogActivity" android:exported="false" />
 
         <service

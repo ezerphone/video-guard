@@ -23,6 +23,10 @@ object Prefs {
     fun lastScan(c: Context) = sp(c).getLong("last_scan", 0L)
     fun setLastScan(c: Context, t: Long) { sp(c).edit().putLong("last_scan", t).commit() }
 
+    /** מספר האתחול שבו בוצע שינוי בקבצי המערכת (כדי להציג "ממתין להפעלה מחדש"). */
+    fun rebootBoot(c: Context) = sp(c).getInt("reboot_boot", -1)
+    fun setRebootBoot(c: Context, n: Int) { sp(c).edit().putInt("reboot_boot", n).commit() }
+
     // ── אפליקציות ──
     /** אפליקציות שהשעינו (כדי לדעת מה לשחרר). */
     fun suspended(c: Context) = set(c, "suspended")

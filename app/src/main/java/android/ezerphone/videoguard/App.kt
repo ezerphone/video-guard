@@ -8,7 +8,6 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.View
-import android.view.WindowManager
 
 class VgApp : Application() {
     override fun onCreate() {
@@ -34,7 +33,7 @@ class BootReceiver : BroadcastReceiver() {
  *    שבודק את הנעילה ב-onCreate, *לפני* שהתוכן נבנה, ואם נעול — עובר למסך הקוד.
  *  - ברגע שאף מסך של האפליקציה לא גלוי (Home, מעבר לאפליקציה אחרת, כיבוי מסך) האפליקציה ננעלת
  *    וכל המסכים שלה נסגרים. היא נשארת ב"אחרונים", אבל לחיצה עליה פותחת מחדש את מסך הקוד.
- *  - FLAG_SECURE: התצוגה המקדימה ב"אחרונים" ריקה, ואי אפשר לצלם מסך.
+ *  - התצוגה המקדימה ב"אחרונים" ריקה (Android 13 ומעלה). צילומי מסך מותרים.
  */
 object Lock {
     @Volatile var unlocked = false
@@ -48,7 +47,6 @@ object Lock {
         app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityCreated(a: Activity, b: Bundle?) {
                 alive += a
-                a.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                 if (Build.VERSION.SDK_INT >= 33) a.setRecentsScreenshotEnabled(false)
                 a.window.decorView.layoutDirection = View.LAYOUT_DIRECTION_RTL
             }
@@ -72,17 +70,58 @@ object Lock {
 
 /** מסך מוגן: בלי קוד נכון הוא לא נבנה בכלל, אלא מעביר למסך הקוד. */
 abstract class Guarded : Activity() {
+    /** התאמה אוטומטית לגובה המסך: התוכן מוקטן עד שהוא נכנס בלי גלילה. */
+    protected open val autoFit = false
+    private var fitK = 1f
+
     final override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (!Lock.unlocked) { toLock(); return }
+        St.k = 1f
         build()
     }
 
     override fun onResume() {
         super.onResume()
         if (!Lock.unlocked) { toLock(); return }
+        fitK = 1f
+        St.k = fitK
         refresh()
+        if (autoFit) fit()
     }
+
+    /**
+     * לפני כל ציור: אם התוכן גבוה מהמסך, מקטינים את המקדם באותו יחס ובונים מחדש (בלי לצייר את
+     * הגרסה הגדולה). עד [MIN_K]; מתחת לזה הטקסט קטן מדי, והמסך פשוט נגלל.
+     */
+    private fun fit() {
+        val listener = object : android.view.ViewTreeObserver.OnPreDrawListener {
+            var rounds = 0
+            override fun onPreDraw(): Boolean {
+                val sv = findScroll(window.decorView)
+                val child = sv?.getChildAt(0)
+                val have = sv?.height ?: 0
+                val need = child?.height ?: 0
+                if (have > 0 && need > have && fitK > MIN_K && rounds++ < 6) {
+                    fitK = maxOf(MIN_K, fitK * have / need * 0.98f)
+                    St.k = fitK
+                    refresh()
+                    return false
+                }
+                window.decorView.viewTreeObserver.removeOnPreDrawListener(this)
+                return true
+            }
+        }
+        window.decorView.viewTreeObserver.addOnPreDrawListener(listener)
+    }
+
+    private fun findScroll(v: View): android.widget.ScrollView? {
+        if (v is android.widget.ScrollView) return v
+        if (v is android.view.ViewGroup) for (i in 0 until v.childCount) findScroll(v.getChildAt(i))?.let { return it }
+        return null
+    }
+
+    companion object { const val MIN_K = 0.7f }
 
     private fun toLock() {
         startActivity(Intent(this, LockActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))

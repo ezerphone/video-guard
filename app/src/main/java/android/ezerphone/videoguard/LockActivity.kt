@@ -32,6 +32,7 @@ class LockActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        St.k = 1f
         // שינוי קוד רק כשהאפליקציה כבר פתוחה; מבחוץ אי אפשר לבקש אותו
         changing = intent.getBooleanExtra("change", false) && Lock.unlocked
         step = if (changing || !Prefs.hasPin(this)) Step.NEW else Step.ENTER

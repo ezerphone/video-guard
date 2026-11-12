@@ -39,7 +39,13 @@ object St {
 
     val MEDIUM: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 
-    fun dp(c: Context, v: Number) = (v.toFloat() * c.resources.displayMetrics.density).toInt()
+    /**
+     * מקדם הקטנה של המסך הנוכחי. מסך עם התאמה אוטומטית ([Guarded.autoFit]) מקטין אותו עד שהתוכן
+     * נכנס בגובה המסך בלי גלילה; כל הגדלים (dp) והטקסטים עוברים דרכו.
+     */
+    var k = 1f
+
+    fun dp(c: Context, v: Number) = (v.toFloat() * c.resources.displayMetrics.density * k).toInt()
 
     fun round(c: Context, color: Int, radiusDp: Number, stroke: Int? = null): GradientDrawable =
         GradientDrawable().apply {
@@ -50,7 +56,7 @@ object St {
     private fun ripple(bg: Drawable?, mask: Drawable) = RippleDrawable(ColorStateList.valueOf(0x22000000), bg, mask)
 
     fun text(c: Context, t: CharSequence, sizeSp: Float, color: Int = TEXT, medium: Boolean = false) = TextView(c).apply {
-        text = t; textSize = sizeSp; setTextColor(color)
+        text = t; textSize = sizeSp * k; setTextColor(color)
         if (medium) typeface = MEDIUM
         setLineSpacing(0f, 1.15f)
     }
@@ -65,7 +71,7 @@ object St {
     fun button(c: Context, t: String, kind: Char = 'p', small: Boolean = false, color: Int = PRIMARY, f: () -> Unit) =
         TextView(c).apply {
             text = t; gravity = Gravity.CENTER; typeface = MEDIUM
-            textSize = if (small) 14f else 16f
+            textSize = (if (small) 14f else 16f) * k
             val h = if (small) 38 else 48
             minHeight = dp(c, h); minimumHeight = dp(c, h)
             setPadding(dp(c, if (small) 16 else 22), 0, dp(c, if (small) 16 else 22), 0)
@@ -208,7 +214,6 @@ object St {
             val wide = a.resources.configuration.screenWidthDp > MAX_WIDTH_DP
             setLayout(if (wide) dp(a, MAX_WIDTH_DP) else ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             setGravity(Gravity.BOTTOM)
-            addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         }
         d.show()
     }

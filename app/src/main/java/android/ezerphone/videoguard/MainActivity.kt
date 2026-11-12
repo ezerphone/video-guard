@@ -22,6 +22,7 @@ object Status {
 
 class MainActivity : Guarded() {
     private lateinit var body: LinearLayout
+    override val autoFit = true
 
     override fun build() {
         body = St.screen(this, "חוסם וידאו", gear = { startActivity(Intent(this, SettingsActivity::class.java)) })
@@ -47,11 +48,11 @@ class MainActivity : Guarded() {
         }
         val hero = St.row(this).apply {
             background = St.round(this@MainActivity, heroBg as Int, 24)
-            setPadding(St.dp(this@MainActivity, 20), St.dp(this@MainActivity, 26), St.dp(this@MainActivity, 20), St.dp(this@MainActivity, 26))
-            addView(St.icon(this@MainActivity, heroIcon as Int, 52))
+            setPadding(St.dp(this@MainActivity, 18), St.dp(this@MainActivity, 18), St.dp(this@MainActivity, 18), St.dp(this@MainActivity, 18))
+            addView(St.icon(this@MainActivity, heroIcon as Int, 44))
             addView(View(this@MainActivity), St.lp(St.dp(this@MainActivity, 16), 1))
             addView(St.col(this@MainActivity).apply {
-                addView(St.text(this@MainActivity, heroTitle as String, 24f, St.TEXT, true))
+                addView(St.text(this@MainActivity, heroTitle as String, 22f, St.TEXT, true))
                 addView(St.text(this@MainActivity, heroSub as String, 15f, St.MUTED))
             }, St.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
@@ -98,18 +99,18 @@ class MainActivity : Guarded() {
 
     private fun onChip() = St.chip(this, "פועל", St.OK, St.OK_SOFT)
 
-    private fun spaced() = St.lp().apply { topMargin = St.dp(this@MainActivity, 12) }
+    private fun spaced() = St.lp().apply { topMargin = St.dp(this@MainActivity, 10) }
 
     private fun card(icon: Int, title: String, desc: String, end: View): View {
         val r = St.row(this)
         r.gravity = Gravity.TOP
         r.background = St.round(this, St.SURFACE, 20)
-        r.setPadding(St.dp(this, 18), St.dp(this, 18), St.dp(this, 18), St.dp(this, 18))
-        r.addView(St.iconBox(this, icon))
+        r.setPadding(St.dp(this, 16), St.dp(this, 14), St.dp(this, 16), St.dp(this, 14))
+        r.addView(St.iconBox(this, icon, box = 40, size = 22, radius = 12))
         r.addView(View(this), St.lp(St.dp(this, 14), 1))
         r.addView(St.col(this).apply {
-            addView(St.text(this@MainActivity, title, 17f, St.TEXT, true))
-            addView(St.text(this@MainActivity, desc, 14f, St.MUTED))
+            addView(St.text(this@MainActivity, title, 16f, St.TEXT, true))
+            addView(St.text(this@MainActivity, desc, 13f, St.MUTED))
         }, St.lp(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         r.addView(View(this), St.lp(St.dp(this, 10), 1))
         r.addView(end)
@@ -186,6 +187,7 @@ class AppsActivity : Guarded() {
 
 class SettingsActivity : Guarded() {
     private lateinit var body: LinearLayout
+    override val autoFit = true
 
     override fun build() { body = St.screen(this, "הגדרות", back = true) }
 
